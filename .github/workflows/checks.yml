@@ -21,10 +21,16 @@ jobs:
           build-args: --wfail
           test: false
           lint: false
-      - name: Check proofs and language examples
+      - name: Replay the compiled proofs
+        working-directory: Lean
+        env:
+          LEAN_NUM_THREADS: '1'
+        run: |
+          ulimit -s 131072
+          lake env leanchecker -v Laiu
+      - name: Check axioms and language examples
         working-directory: Lean
         run: |
-          lake env leanchecker Laiu
           lake env lean ProofAudit.lean
           lake env lean --run Audit.lean
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0

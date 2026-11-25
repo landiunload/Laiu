@@ -21,13 +21,6 @@ jobs:
           build-args: --wfail
           test: false
           lint: false
-      - name: Replay the compiled proofs
-        working-directory: Lean
-        env:
-          LEAN_NUM_THREADS: '1'
-        run: |
-          ulimit -s 131072
-          lake env leanchecker -v Laiu
       - name: Check axioms and language examples
         working-directory: Lean
         run: |
@@ -41,3 +34,11 @@ jobs:
           python -m pip install --only-binary=:all: -r checks/requirements.txt
           python checks/check_docs.py
           python checks/check_fonts.py
+      - name: Replay the compiled proofs
+        working-directory: Lean
+        run: |
+          for source in Laiu/*.lean; do
+            module="${source%.lean}"
+            echo "Checking $module"
+            lake env leanchecker "${module//\//.}"
+          done

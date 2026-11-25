@@ -1,0 +1,116 @@
+import Laiu
+
+open Laiu
+
+private def cells (line : String) : List String :=
+  (line.splitOn "|").drop 1 |>.dropLast |>.map (fun cell => cell.trimAscii.toString)
+
+private def codeWord (cell : String) : Option String :=
+  match cell.splitOn "`" with
+  | ["", word, ""] => some word
+  | _ => none
+
+private def dictionaryRow (line : String) : Option (String × String) := do
+  let first :: second :: _ := cells line | none
+  if let some digit := first.toNat? then
+    return (← codeWord second, s!"число {digit}")
+  else
+    return (← codeWord first, second)
+
+private def require (holds : Bool) (message : String) : IO Unit :=
+  unless holds do throw (IO.userError message)
+
+private def checkDictionary (markdown : String) : IO Unit := do
+  let entries := (markdown.splitOn "\n").filterMap dictionaryRow
+  if entries != Lexicon.entries then
+    let mismatch := (List.zip entries Lexicon.entries).find? (fun (left, right) => left != right)
+    throw (IO.userError s!"Лексика.md: {entries.length} строк, в Lean {Lexicon.entries.length}. Первое расхождение: {repr mismatch}")
+  IO.println s!"Лексика: {entries.length} записей совпадают с Lean, включая значения."
+  IO.println s!"Словарь и продуктивные формы: {Morphology.reservedForms.eraseDups.length} различных форм."
+
+private def tokens (text : String) : List String :=
+  (text.splitOn " ").filter (!·.isEmpty)
+
+private def checkNumerals (markdown : String) : IO Unit := do
+  let rows := (markdown.splitOn "\n").filterMap fun line => do
+    let first :: spelling :: _ := cells line | none
+    let number ← (first.replace " " "").toNat?
+    return (number, ← codeWord spelling)
+  require (!rows.isEmpty) "В Числа.md не найдены примеры с числовыми значениями."
+  for (value, spelling) in rows do
+    let written := tokens spelling
+    require (NumberWords.parse written == some value && NumberWords.spell value == written)
+      s!"Числа.md: «{spelling}» не соответствует {value}."
+  IO.println s!"Числа: {rows.length} примеров из справочника совпадают с формальной записью."
+
+private def cyrillicLetters (text : String) : Nat :=
+  (text.toLower.toList.filter (fun c => ('а' ≤ c && c ≤ 'я') || c == 'ё')).length
+
+private def comparison (left right : Nat) : String := s!"{left} / {right}"
+
+private def codeSpans : List String → List String
+  | _ :: code :: rest => code :: codeSpans rest
+  | _ => []
+
+private def checkFrameExamples (markdown : String) : IO Unit := do
+  let examples := (markdown.splitOn "\n").flatMap (fun line => codeSpans (line.splitOn "`"))
+  let framed := examples.filterMap fun exampleText =>
+    let phrase := tokens (exampleText.replace "." " " |>.replace "," " " |>.replace "?" " ")
+    if phrase.length > 1 && (phrase.contains "тэ" || phrase.contains "эт") && !phrase.contains "…" then
+      some (exampleText, phrase)
+    else none
+  require (!framed.isEmpty) "В проверке синтаксиса не найдены фразы с рамками."
+  for (sample, phrase) in framed do
+    require (Frames.balances phrase) s!"Разорванная рамка тэ … эт: «{sample}»."
+  IO.println s!"Рамки: {framed.length} примеров с тэ … эт имеют ожидаемые границы."
+
+private def checkBenchmarks (markdown : String) : IO Unit := do
+  let table := (markdown.splitOn "\n").map cells
+  let rows := table.filterMap fun row => do
+    let [laiu, russian, letters, words] := row | none
+    return (← codeWord laiu, russian, letters, words)
+  require (!rows.isEmpty) "В формальном анализе не найдены фразы для сравнения."
+  for (laiu, russian, letters, words) in rows do
+    let expectedLetters := comparison (cyrillicLetters laiu) (cyrillicLetters russian)
+    let expectedWords := comparison (tokens laiu).length (tokens russian).length
+    require (letters == expectedLetters && words == expectedWords)
+      s!"Фраза «{laiu}»: ожидается {expectedLetters} букв и {expectedWords} слов."
+    require (Frames.balances (tokens laiu)) s!"Разорванная рамка тэ … эт: «{laiu}»."
+    for token in tokens laiu do
+      require (Morphology.reservedForms.contains token) s!"Фраза «{laiu}»: неизвестное слово «{token}»."
+  let left := rows.map (fun (laiu, _, _, _) => laiu)
+  let right := rows.map (fun (_, russian, _, _) => russian)
+  let totalLetters := comparison (left.map cyrillicLetters).sum (right.map cyrillicLetters).sum
+  let totalWords := comparison (left.flatMap tokens).length (right.flatMap tokens).length
+  let totals := table.filter fun row => row.head? == some "Всего"
+  require (totals == [["Всего", toString rows.length, totalLetters, totalWords]])
+    s!"Строка «Всего»: ожидается {rows.length}, {totalLetters} букв, {totalWords} слов."
+  let laiuWords := left.flatMap tokens
+  let boundaries := left.flatMap fun phrase =>
+    let words := tokens phrase
+    (words.zip words.tail).filter (fun (a, b) => Phonology.hasSameVowelBoundary a b)
+  IO.println s!"Краткость: {rows.length} фраз, буквы {totalLetters}, слова {totalWords} (Laiu / русский)."
+  IO.println s!"Laiu: {(laiuWords.map Phonology.glyphBases).sum} основных знаков письма, {(laiuWords.map Phonology.vowelBeats).sum} гласных долей."
+  IO.println s!"Стыки одинаковых гласных ({boundaries.length}): {String.intercalate ", " (boundaries.map fun (a, b) => s!"{a} | {b}")}."
+
+private def showLengthContrasts : IO Unit := do
+  let forms := Lexicon.forms Lexicon.entries
+  let profiles := forms.map Phonology.withoutVowelLength
+  let groups := profiles.eraseDups.filterMap fun profile =>
+    let words := (forms.zip profiles).filterMap fun (word, signature) =>
+      if signature == profile then some word else none
+    if words.length > 1 then some words else none
+  IO.println s!"Словарные ряды, различимые только по долготе: {groups.length}."
+  for group in groups do
+    IO.println (String.intercalate " / " group)
+
+def main (args : List String) : IO Unit := do
+  let vault : System.FilePath ← match args with
+    | [] => pure ".."
+    | [path] => pure path
+    | _ => throw (IO.userError "Укажи один путь к хранилищу Obsidian.")
+  checkDictionary (← IO.FS.readFile (vault / "Лексика.md"))
+  checkNumerals (← IO.FS.readFile (vault / "Числа.md"))
+  checkFrameExamples (← IO.FS.readFile (vault / "Проверка синтаксиса.md"))
+  checkBenchmarks (← IO.FS.readFile (vault / "Формальный анализ.md"))
+  showLengthContrasts

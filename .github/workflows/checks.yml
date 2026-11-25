@@ -1,0 +1,37 @@
+name: Checks
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Lean, notes and fonts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: leanprover/lean-action@ba3fdfe5c4476c925da13bf11a005ddb47e47aee # v1.7.1
+        with:
+          lake-package-directory: Lean
+          build: true
+          build-args: --wfail
+          test: false
+          lint: false
+      - name: Check proofs and language examples
+        working-directory: Lean
+        run: |
+          lake env leanchecker Laiu
+          lake env lean ProofAudit.lean
+          lake env lean --run Audit.lean
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Check reference links and font shaping
+        run: |
+          python -m pip install --only-binary=:all: -r checks/requirements.txt
+          python checks/check_docs.py
+          python checks/check_fonts.py

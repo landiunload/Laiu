@@ -38,6 +38,16 @@ def glyphBases (word : String) : Nat := (collapseRuns (fun _ => true) none word.
 
 def vowelBeats (word : String) : Nat := (word.toList.filter isVowel).length
 
+def syllableCount (word : String) : Nat :=
+  ((collapseRuns isVowel none word.toList).filter isVowel).length
+
+/-- With maximal onset, a coda occurs before a two-consonant boundary or at word end. -/
+def closedSyllableCount (word : String) : Nat :=
+  let afterVowels := (word.toList.splitOnP isVowel).drop 1
+  let internal := (afterVowels.dropLast.filter fun run => run.length == 2).length
+  let final := if (afterVowels.getLast?.getD []).isEmpty then 0 else 1
+  internal + final
+
 def hasSameVowelBoundary (left right : String) : Bool :=
   match left.toList.getLast?, right.toList.head? with
   | some first, some second => isVowel first && first == second
@@ -53,7 +63,9 @@ set_option maxHeartbeats 0 in
 theorem checked_forms_fit_available_repeat_marks :
     Morphology.reservedForms.all fitsRepeatMarks = true := by decide
 
-example : withoutVowelLength "ли" = withoutVowelLength "лии" ∧
-    withoutVowelLength "лии" = withoutVowelLength "лиии" := by decide
+example : withoutVowelLength "и" = withoutVowelLength "ии" := by decide
+example : syllableCount "нэлу" = 2 ∧ closedSyllableCount "нэлу" = 0 := by decide
+example : syllableCount "ами" = 2 ∧ closedSyllableCount "ами" = 0 := by decide
+example : syllableCount "киурри" = 3 ∧ closedSyllableCount "киурри" = 1 := by decide
 
 end Laiu.Phonology

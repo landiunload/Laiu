@@ -66,8 +66,12 @@ inductive Time where
 def Time.words : Time → List String
   | .implicit => []
   | .past => ["ло"]
-  | .present => ["лаи"]
+  | .present => ["лэ"]
   | .future => ["лу"]
+
+theorem explicit_time_words_use_two_letters {time : Time} (explicit : time ≠ .implicit) :
+    ∃ word, time.words = [word] ∧ word.length = 2 := by
+  cases time <;> simp_all [Time.words] <;> decide
 
 inductive Place where
   | garden | house | tree
@@ -179,7 +183,7 @@ private def takeTravel : List String → Option (Travel × List String)
 
 private def takeTime : List String → Time × List String
   | "ло" :: rest => (.past, rest)
-  | "лаи" :: rest => (.present, rest)
+  | "лэ" :: rest => (.present, rest)
   | "лу" :: rest => (.future, rest)
   | rest => (.implicit, rest)
 

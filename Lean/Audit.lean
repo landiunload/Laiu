@@ -91,6 +91,9 @@ private def checkBenchmarks (markdown : String) : IO Unit := do
     (words.zip words.tail).filter (fun (a, b) => Phonology.hasSameVowelBoundary a b)
   IO.println s!"Краткость: {rows.length} фраз, буквы {totalLetters}, слова {totalWords} (Laiu / русский)."
   IO.println s!"Laiu: {(laiuWords.map Phonology.glyphBases).sum} основных знаков письма, {(laiuWords.map Phonology.vowelBeats).sum} гласных долей."
+  let syllables := (laiuWords.map Phonology.syllableCount).sum
+  let closed := (laiuWords.map Phonology.closedSyllableCount).sum
+  IO.println s!"Слоги Laiu: {syllables - closed} открытых и {closed} закрытых."
   IO.println s!"Стыки одинаковых гласных ({boundaries.length}): {String.intercalate ", " (boundaries.map fun (a, b) => s!"{a} | {b}")}."
 
 private def showLengthContrasts : IO Unit := do

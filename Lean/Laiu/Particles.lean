@@ -206,9 +206,18 @@ theorem never_during_iff_no_occurrence (observations : List Bool) :
 set_option maxRecDepth 4096 in
 set_option maxHeartbeats 0 in
 theorem new_words_are_distinct_without_vowel_length :
-    ["лэ", "лам", "лим", "ами", "нэлу"].all (fun word =>
+    ["лэ", "лам", "лим", "ами", "нэлу", "тиа"].all (fun word =>
       (Morphology.reservedForms.filter (fun candidate =>
         Phonology.withoutVowelLength candidate == Phonology.withoutVowelLength word)) == [word]) = true := by
   decide
+
+theorem start_does_not_run_into_person (person : Syntax.Person) :
+    (Syntax.Phase.starts.words.head?.map (Phonology.hasSameVowelBoundary person.word)) = some false := by
+  cases person <;> decide
+
+example : Syntax.parse ["и", "тиа", "ки"] =
+    some ⟨.speaker, false, .starts, .go, .implicit, false, none⟩ := by decide
+
+example : Phonology.syllableCount "тиа" = 2 ∧ Phonology.closedSyllableCount "тиа" = 0 := by decide
 
 end Laiu.Particles

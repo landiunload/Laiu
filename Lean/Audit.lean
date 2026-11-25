@@ -64,6 +64,22 @@ private def checkFrameExamples (markdown : String) : IO Unit := do
     require (Frames.balances phrase) s!"Разорванная рамка тэ … эт: «{sample}»."
   IO.println s!"Рамки: {framed.length} примеров с тэ … эт имеют ожидаемые границы."
 
+private def checkListeningExamples (markdown : String) : IO Unit := do
+  let rows := (markdown.splitOn "\n").filterMap fun line => do
+    let [left, right, expected] := cells line | none
+    return (← codeWord left, ← codeWord right, expected)
+  require (!rows.isEmpty) "В фонологии не найдены пары для проверки звучания."
+  let known := Morphology.reservedForms
+  for (left, right, expected) in rows do
+    let first := tokens left
+    let second := tokens right
+    require ((first ++ second).all known.contains) s!"Неизвестное слово в пробе «{left} / {right}»."
+    let distinguishable := Phonology.withoutVowelLength (String.join first) !=
+      Phonology.withoutVowelLength (String.join second)
+    let actual := if distinguishable then "сохраняется" else "теряется"
+    require (expected == actual) s!"Проба «{left} / {right}»: различие {actual}."
+  IO.println s!"Звучание: {rows.length} пар проверены при потере долготы и границ слов."
+
 private def checkBenchmarks (markdown : String) : IO Unit := do
   let table := (markdown.splitOn "\n").map cells
   let rows := table.filterMap fun row => do
@@ -115,5 +131,6 @@ def main (args : List String) : IO Unit := do
   checkDictionary (← IO.FS.readFile (vault / "Лексика.md"))
   checkNumerals (← IO.FS.readFile (vault / "Числа.md"))
   checkFrameExamples (← IO.FS.readFile (vault / "Проверка синтаксиса.md"))
+  checkListeningExamples (← IO.FS.readFile (vault / "Фонология.md"))
   checkBenchmarks (← IO.FS.readFile (vault / "Формальный анализ.md"))
   showLengthContrasts

@@ -56,7 +56,7 @@ inductive Phase where
 
 def Phase.words : Phase → List String
   | .neutral => []
-  | .starts => ["иит"]
+  | .starts => ["тиа"]
   | .stops => ["эо"]
 
 inductive Time where
@@ -171,7 +171,7 @@ private def takeFlag (marker : String) : List String → Bool × List String
   | first :: rest => if first == marker then (true, rest) else (false, first :: rest)
 
 private def takePhase : List String → Phase × List String
-  | "иит" :: rest => (.starts, rest)
+  | "тиа" :: rest => (.starts, rest)
   | "эо" :: rest => (.stops, rest)
   | rest => (.neutral, rest)
 

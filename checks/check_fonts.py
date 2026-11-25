@@ -30,7 +30,7 @@ def check_font(path):
             raise ValueError(f"{path.name}: «{text}» использует уже занятый знак")
         signatures[text] = glyphs
 
-    for text in (*ALPHABET.upper(), "ии", "иИ", "ИиИ", "киив", "киурри", "и иит", "куа а"):
+    for text in (*ALPHABET.upper(), "ии", "иИ", "ИиИ", "киив", "киурри", "и ии", "куа а"):
         expected = tuple(
             glyph
             for char, run in groupby(text.lower())

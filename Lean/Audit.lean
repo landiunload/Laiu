@@ -202,6 +202,25 @@ private def checkDistinctWordSound (word : String) : IO Unit := do
   let resembling := Morphology.reservedForms.filter (fun form => Phonology.withoutVowelLength form == key)
   require (resembling == [word]) s!"Созвучная форма для «{word}»: {resembling}."
 
+private def checkDeixis (markdown : String) : IO Unit := do
+  let grammarRows := (markdown.splitOn "\n").map cells
+  let table := grammarRows.dropWhile (· != ["На что указываем", "Рядом", "Вдали"])
+  let rows := table.drop 2 |>.takeWhile (!·.isEmpty)
+  let roles : List (String × Deixis.Use) :=
+    [("Один предмет", .one), ("Несколько предметов", .many), ("Место", .place)]
+  require (rows.length == roles.length) "Указательная таблица должна содержать три строки."
+  for (row, (expectedLabel, role)) in rows.zip roles do
+    let [label, nearby, distant] := row |
+      throw (IO.userError "В указательной таблице нужны колонки «Рядом» и «Вдали».")
+    require (label == expectedLabel) s!"В указательной таблице ожидается строка «{expectedLabel}»."
+    for (cell, distance) in [(nearby, Deixis.Distance.near), (distant, .far)] do
+      let some spelling := (cell.splitOn "`")[1]? |
+        throw (IO.userError s!"Нет указательной формы в «{cell}».")
+      require (Deixis.read spelling == some (distance, role))
+        s!"В строке «{label}» ожидается форма «{Deixis.word distance role}»."
+      checkDistinctWordSound spelling
+  IO.println "Указательные формы: расстояние и назначение сверены с грамматикой."
+
 private def checkConditionals (markdown : String) : IO Unit := do
   let rows := (markdown.splitOn "\n").filterMap fun line => do
     let [connector, kind, exampleText, _] := cells line | none
@@ -337,6 +356,7 @@ def main (args : List String) : IO Unit := do
     | [path] => pure path
     | _ => throw (IO.userError "Укажи один путь к хранилищу Obsidian.")
   checkDictionary (← IO.FS.readFile (vault / "Лексика.md"))
+  checkDeixis (← IO.FS.readFile (vault / "Грамматика.md"))
   checkNumerals (← IO.FS.readFile (vault / "Числа.md"))
   checkFrameExamples (← IO.FS.readFile (vault / "Проверка синтаксиса.md"))
   checkListeningExamples (← IO.FS.readFile (vault / "Фонология.md"))

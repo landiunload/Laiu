@@ -46,14 +46,20 @@ theorem duration_loss_preserves_consonants (text : String) :
     (withoutVowelLength text).toList.filter (!isVowel ·) = text.toList.filter (!isVowel ·) := by
   simpa [withoutVowelLength] using collapse_keeps_consonants text.toList none
 
-theorem distinct_consonant_counts_survive_in_context (first second left right : String)
-    (different : (first.toList.filter (!isVowel ·)).length ≠ (second.toList.filter (!isVowel ·)).length) :
+theorem distinct_consonants_survive_in_context (first second left right : String)
+    (different : first.toList.filter (!isVowel ·) ≠ second.toList.filter (!isVowel ·)) :
     withoutVowelLength (left ++ first ++ right) ≠ withoutVowelLength (left ++ second ++ right) := by
   intro same
-  have count := congrArg (fun text : String => (text.toList.filter (!isVowel ·)).length) same
+  have consonants := congrArg (fun text : String => text.toList.filter (!isVowel ·)) same
   simp only [duration_loss_preserves_consonants, String.toList_append, List.filter_append,
-    List.length_append] at count
-  omega
+    List.append_assoc, List.append_cancel_left_eq, List.append_cancel_right_eq] at consonants
+  exact different consonants
+
+theorem distinct_consonant_counts_survive_in_context (first second left right : String)
+    (different : (first.toList.filter (!isVowel ·)).length ≠ (second.toList.filter (!isVowel ·)).length) :
+    withoutVowelLength (left ++ first ++ right) ≠ withoutVowelLength (left ++ second ++ right) :=
+  distinct_consonants_survive_in_context first second left right
+    (fun same => different (congrArg List.length same))
 
 def glyphBases (word : String) : Nat := (collapseRuns (fun _ => true) none word.toList).length
 

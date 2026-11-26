@@ -157,6 +157,8 @@ private def checkTemporalAdverbs (markdown : String) : IO Unit := do
     let atStart := spokenTokens first
     let some timed := TemporalAdverbs.parse atEnd |
       throw (IO.userError s!"Не удалось разобрать наречие в «{last}».")
+    require (timed.resolvedTime .present).isSome
+      s!"Частица и наречие задают разные времена в «{last}»."
     require (TemporalAdverbs.parse atStart == some timed &&
       TemporalAdverbs.render timed .final == atEnd && TemporalAdverbs.render timed .initial == atStart)
       s!"«{last}» и «{first}» должны быть двумя порядками одной фразы."
@@ -167,6 +169,33 @@ private def checkTemporalAdverbs (markdown : String) : IO Unit := do
       | .final => "в конце"
     require (preferred == actual) s!"Для «{last}» при учёте стыков наречие ставится {actual}."
   IO.println s!"Пары с наречиями времени ({rows.length}) сверены с разбором и стыками гласных."
+
+private def checkTimeCompaction (markdown : String) : IO Unit := do
+  let sectionLines := (markdown.splitOn "\n").dropWhile (fun line =>
+    line.trimAscii.toString != "### Когда частицу можно опустить")
+  let body := sectionLines.tail.takeWhile (!·.startsWith "#")
+  let rows := body.filterMap fun line => do
+    let [original, short, time] := cells line | none
+    return (← codeWord original, ← codeWord short, time)
+  require (!rows.isEmpty) "Не найдены примеры сокращения частиц времени."
+  for (original, short, time) in rows do
+    let fullWords := spokenTokens original
+    let some utterance := TemporalAdverbs.parse fullWords |
+      throw (IO.userError s!"Не удалось разобрать «{original}».")
+    let some actual := utterance.resolvedTime .present |
+      throw (IO.userError s!"Частица и наречие задают разные времена в «{original}».")
+    let actualName := match actual with
+      | .past => "прошлое"
+      | .present => "настоящее"
+      | .future => "будущее"
+    require (time == actualName) s!"В «{original}» время должно быть «{actualName}»."
+    let position : TemporalAdverbs.Position :=
+      if TemporalAdverbs.render utterance .initial == fullWords then .initial else .final
+    let some compact := TemporalAdverbs.compact utterance .present |
+      throw (IO.userError s!"Не удалось сократить «{original}».")
+    require (TemporalAdverbs.render compact position == spokenTokens short)
+      s!"Для «{original}» ожидается другая форма."
+  IO.println s!"Время с наречиями проверено на примерах ({rows.length})."
 
 private def checkDirectives (markdown : String) : IO Unit := do
   let rows := (markdown.splitOn "\n").filterMap fun line => do
@@ -260,7 +289,9 @@ def main (args : List String) : IO Unit := do
   let questions ← IO.FS.readFile (vault / "Вопросительные слова.md")
   checkSpatialAnswers questions
   checkPolarityAnswers questions
-  checkTemporalAdverbs (← IO.FS.readFile (vault / "Наречия.md"))
+  let adverbs ← IO.FS.readFile (vault / "Наречия.md")
+  checkTemporalAdverbs adverbs
+  checkTimeCompaction adverbs
   checkDirectives (← IO.FS.readFile (vault / "Модальность.md"))
   checkGardenDialogue (← IO.FS.readFile (vault / "Разговор в саду.md"))
   checkBenchmarks (← IO.FS.readFile (vault / "Формальный анализ.md"))

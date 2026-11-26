@@ -127,9 +127,38 @@ def inheritedTense (parent : Tense) : FrameAnchor → Tense
   | .dependent => parent
   | .independent first => first.getD .present
 
+/-- The particle and adverb constrain the same event time. Use the context only when neither specifies it. -/
+def resolveTense (fallback : Tense) (particle adverb : Option Tense) : Option Tense :=
+  match particle, adverb with
+  | some written, some fixed => if written = fixed then some fixed else none
+  | some written, none => some written
+  | none, fixed => some (fixed.getD fallback)
+
+theorem resolved_without_fixed_adverb (fallback : Tense) (particle : Option Tense) :
+    resolveTense fallback particle none = some (particle.getD fallback) := by
+  cases particle <;> rfl
+
+theorem matching_particle_is_redundant (fallback fixed : Tense) :
+    resolveTense fallback (some fixed) (some fixed) = resolveTense fallback none (some fixed) := by
+  simp [resolveTense]
+
+theorem conflicting_time_fails (fallback particle adverb : Tense) (different : particle ≠ adverb) :
+    resolveTense fallback (some particle) (some adverb) = none := by
+  simp [resolveTense, different]
+
 def actionTenses (parent : Tense) (anchor : FrameAnchor) :
     List (Option Tense) → List Tense :=
   List.map (fun written => written.getD (inheritedTense parent anchor))
+
+def actionTensesWithAdverbs (parent : Tense) (anchor : FrameAnchor)
+    (actions : List (Option Tense × Option Tense)) : Option (List Tense) :=
+  actions.mapM fun (particle, adverb) => resolveTense (inheritedTense parent anchor) particle adverb
+
+theorem fixed_adverb_acts_like_local_particle (parent fixed : Tense) (anchor : FrameAnchor)
+    (before after : List (Option Tense × Option Tense)) :
+    actionTensesWithAdverbs parent anchor (before ++ (none, some fixed) :: after) =
+      actionTensesWithAdverbs parent anchor (before ++ (some fixed, none) :: after) := by
+  simp [actionTensesWithAdverbs, List.mapM_append, resolveTense]
 
 theorem override_stays_local (parent explicit : Tense) (anchor : FrameAnchor)
     (before after : List (Option Tense)) :
@@ -148,10 +177,19 @@ theorem independent_clause_ignores_each_parent (left right : Tense) (first : Opt
       actionTenses right (.independent first) actions := by
   simp [actionTenses, inheritedTense]
 
+theorem omitting_matching_particle_preserves_dependent_times (fallback fixed : Tense)
+    (actions : List (Option Tense)) :
+    (resolveTense fallback (some fixed) (some fixed)).map (fun time => actionTenses time .dependent actions) =
+      (resolveTense fallback none (some fixed)).map (fun time => actionTenses time .dependent actions) := by
+  rw [matching_particle_is_redundant]
+
 example :
     actionTenses .past .dependent [none, some .present, none] =
       [.past, .present, .past] := by
   decide
+
+example : actionTensesWithAdverbs .past .dependent [(none, none), (none, some .present)] =
+    some [.past, .present] := by decide
 
 example :
     actionTenses .past (.independent none) [none] = [.present] := by

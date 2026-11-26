@@ -15,6 +15,12 @@ def Adverb.word : Adverb → String
   | .atNight => "нуу"
   | .byDay => "аруу"
 
+def Adverb.tense : Adverb → Option Logic.Tense
+  | .now => some .present
+  | .soon => some .future
+  | .recently => some .past
+  | .atNight | .byDay => none
+
 private def readAdverb : String → Option Adverb
   | "ииу" => some .now
   | "луу" => some .soon
@@ -40,6 +46,41 @@ structure TimedUtterance where
   body : Utterance
   adverb : Adverb
   deriving DecidableEq, Repr
+
+def TimedUtterance.resolvedTime (utterance : TimedUtterance) (fallback : Logic.Tense) : Option Logic.Tense :=
+  Logic.resolveTense fallback utterance.body.clause.time.written utterance.adverb.tense
+
+def TimedUtterance.withoutTimeParticle (utterance : TimedUtterance) : TimedUtterance :=
+  { utterance with body := { utterance.body with clause := { utterance.body.clause with time := .implicit } } }
+
+/-- A contradictory sentence has no compact form. Preserve the particle whenever the time would change. -/
+def compact (utterance : TimedUtterance) (fallback : Logic.Tense) : Option TimedUtterance := do
+  let time ← utterance.resolvedTime fallback
+  let unmarked := utterance.withoutTimeParticle
+  if unmarked.resolvedTime fallback = some time then some unmarked else some utterance
+
+theorem compact_preserves_contents (utterance shortened : TimedUtterance) (fallback : Logic.Tense)
+    (accepted : compact utterance fallback = some shortened) :
+    shortened.withoutTimeParticle = utterance.withoutTimeParticle ∧
+      shortened.resolvedTime fallback = utterance.resolvedTime fallback := by
+  obtain ⟨time, resolved, output⟩ := Option.bind_eq_some_iff.mp accepted
+  dsimp only at output
+  split at output
+  · rename_i unchanged
+    obtain rfl := Option.some.inj output
+    exact ⟨rfl, unchanged.trans resolved.symm⟩
+  · obtain rfl := Option.some.inj output
+    exact ⟨rfl, rfl⟩
+
+theorem compact_drops_matching_particle (utterance : TimedUtterance) (fallback fixed : Logic.Tense)
+    (written : utterance.body.clause.time.written = some fixed) (adverb : utterance.adverb.tense = some fixed) :
+    compact utterance fallback = some utterance.withoutTimeParticle := by
+  have full : utterance.resolvedTime fallback = some fixed := by
+    simp [TimedUtterance.resolvedTime, written, adverb, Logic.resolveTense]
+  have short : utterance.withoutTimeParticle.resolvedTime fallback = some fixed := by
+    simp [TimedUtterance.resolvedTime, TimedUtterance.withoutTimeParticle, adverb,
+      Syntax.Time.written, Logic.resolveTense]
+  simp [compact, full, short]
 
 def render (utterance : TimedUtterance) : Position → List String
   | .initial => utterance.adverb.word :: renderUtterance utterance.body
@@ -94,7 +135,21 @@ theorem positions_use_same_word_count (utterance : TimedUtterance) :
     (render utterance .initial).length = (render utterance .final).length := by
   simp [render, renderUtterance] <;> omega
 
+theorem removing_written_particle_saves_one (utterance : TimedUtterance) (position : Position)
+    (written : utterance.body.clause.time ≠ .implicit) :
+    (render utterance.withoutTimeParticle position).length + 1 = (render utterance position).length := by
+  have words : utterance.body.clause.time.words.length = 1 := by
+    cases time : utterance.body.clause.time <;> simp_all [Syntax.Time.words]
+  have length : (Syntax.render utterance.body.clause).length =
+      (Syntax.render { utterance.body.clause with time := .implicit }).length + 1 := by
+    rw [Syntax.render_length, words]
+  cases position <;> simp [render, renderUtterance, TimedUtterance.withoutTimeParticle, length] <;> omega
+
 example : parse ["ииу", "а", "ки", "ииу", "эм"] = none := by decide
 example : parse ["а", "ки", "эм", "ииу"] = none := by decide
+example : (parse ["луу", "и", "ки"]).bind (·.resolvedTime .present) = some .future := by decide
+example : (parse ["и", "ки", "ло", "луу"]).bind (·.resolvedTime .present) = none := by decide
+example : (parse ["и", "ки", "нуу"]).bind (·.resolvedTime .past) = some .past := by decide
+example : (parse ["и", "ки", "луу"]).bind (·.resolvedTime .past) = some .future := by decide
 
 end Laiu.TemporalAdverbs

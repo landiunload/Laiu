@@ -29,6 +29,7 @@ if (mode === "--list") {
 }
 const isHuman = mode === "--recordings";
 let destination = output;
+let makeVoice;
 let voice;
 if (isHuman) {
   if (!folder) throw new Error("Укажите отдельную папку со сделанными WAV-записями");
@@ -39,11 +40,15 @@ if (isHuman) {
 } else {
   const engine = mode ? pathToFileURL(resolve(mode)).href : "@echogarden/espeak-ng-emscripten";
   const { default: init } = await import(engine);
-  const module = await init();
-  voice = new module.eSpeakNGWorker();
-  voice.set_voice("es");
-  voice.set_rate(145);
-  voice.set_pitch(53);
+  makeVoice = async () => {
+    const module = await init();
+    const worker = new module.eSpeakNGWorker();
+    worker.set_voice("es");
+    worker.set_rate(145);
+    worker.set_pitch(53);
+    return worker;
+  };
+  voice = await makeVoice();
 }
 
 const phonemes = {
@@ -133,7 +138,6 @@ async function writeExamples(examples) {
 }
 
 if (!isHuman) await mkdir(output, { recursive: true });
-// Generate scored recordings first so example edits cannot change their fingerprint.
 const audio = {};
 const fingerprint = createHash("sha256");
 for (const [phrase, filename] of recordings) {
@@ -147,5 +151,9 @@ for (const [phrase, filename] of recordings) {
 const data = { source: isHuman ? "human" : "synthetic", audioSet: fingerprint.digest("hex"), pairs, preference, audio };
 await writeFile(new URL("practices.js", destination), `window.laiuListening = ${JSON.stringify(data)};\n`);
 if (isHuman) await copyFile(new URL("Проба.html", output), new URL("Проба.html", destination));
-if (!isHuman) await writeExamples(clips);
+if (!isHuman) {
+  // Keep synthesis state separate so changes to either group leave the other group's recordings intact.
+  voice = await makeVoice();
+  await writeExamples(clips);
+}
 console.log(`Проба на слух: ${pairs.length} пар, ${recordings.size} записей.`);

@@ -137,7 +137,7 @@ theorem compact_preserves_meaning (clause : Phrase) : sameMeaning (compact claus
   change clause.time.compact.resolved = clause.time.resolved
   cases clause.time <;> rfl
 
-private theorem render_length (clause : Phrase) :
+theorem render_length (clause : Phrase) :
     (render clause).length = (render { clause with time := .implicit }).length +
       clause.time.words.length := by
   simp only [render, List.length_append, List.length_cons, List.length_nil, Time.words]

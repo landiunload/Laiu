@@ -1,4 +1,5 @@
 import Laiu.Logic
+import Laiu.Phonology
 
 namespace Laiu.Shortening
 
@@ -49,18 +50,18 @@ theorem shortest_negation_stack (n m : Nat) (body : List String)
 inductive Join where
   | all | any
 
-def Join.word : Join → String
-  | .all => "на"
-  | .any => "эу"
+def Join.connector : Join → Logic.Connector
+  | .all => .all
+  | .any => .any
 
-def Join.eval : Join → List Bool → Bool
-  | .all, choices => choices.all id
-  | .any, choices => choices.any id
+def Join.word (join : Join) : String := join.connector.word
+
+def Join.eval (join : Join) : List Bool → Bool := join.connector.eval
 
 /-- In a homogeneous chain, evaluation is independent of nested grouping. -/
 theorem flatten_truth (join : Join) (before inner after : List Bool) :
     join.eval (before ++ [join.eval inner] ++ after) = join.eval (before ++ inner ++ after) := by
-  cases join <;> simp [Join.eval]
+  cases join <;> simp [Join.eval, Join.connector, Logic.Connector.eval]
 
 def renderChain (join : Join) (operands : List (List String)) : List String :=
   [join.word].intercalate operands
@@ -103,8 +104,22 @@ theorem shorten_homogeneous_chain (join : Join) (before inner after : List (List
   exact ⟨flatten_truth join _ _ _, flatten_length join _ _ _ (by simpa using nonempty)⟩
 
 theorem exclusive_frame_can_change_result :
-    Logic.exactlyOne [true, Logic.exactlyOne [true, true]] ≠ Logic.exactlyOne [true, true, true] := by
+    Logic.Connector.one.eval [true, Logic.Connector.one.eval [true, true]] ≠
+      Logic.Connector.one.eval [true, true, true] := by
   decide
+
+theorem choice_connectors_have_two_open_syllables :
+    [Logic.Connector.any, Logic.Connector.one].all (fun connector =>
+      Phonology.syllableCount connector.word == 2 && Phonology.closedSyllableCount connector.word == 0) = true := by
+  decide
+
+theorem choice_connectors_differ_in_context (left right : String) :
+    Phonology.withoutVowelLength (left ++ Logic.Connector.any.word ++ right) ≠
+      Phonology.withoutVowelLength (left ++ Logic.Connector.one.word ++ right) := by
+  intro same
+  have count := congrArg (fun text : String => (text.toList.filter (!Phonology.isVowel ·)).length) same
+  rw [Phonology.duration_loss_preserves_consonants, Phonology.duration_loss_preserves_consonants] at count
+  simp [Logic.Connector.word, String.toList_append, Phonology.isVowel, Lexicon.vowels] at count
 
 example : renderNegation (2 % 2) ["ки"] = ["ки"] := rfl
 example : renderChain .all [["а", "ки"], ["у", "но"], ["о", "мит"]] =

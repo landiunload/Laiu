@@ -34,6 +34,18 @@ private def collapseRuns (collapse : Char → Bool) (previous : Option Char) : L
 def withoutVowelLength (word : String) : String :=
   String.ofList (collapseRuns isVowel none word.toList)
 
+private theorem collapse_keeps_consonants (sounds : List Char) (previous : Option Char) :
+    (collapseRuns isVowel previous sounds).filter (!isVowel ·) = sounds.filter (!isVowel ·) := by
+  induction sounds generalizing previous with
+  | nil => rfl
+  | cons sound rest ih =>
+    cases vowel : isVowel sound <;> simp [collapseRuns, vowel, ih]
+    split <;> simp [vowel, ih]
+
+theorem duration_loss_preserves_consonants (text : String) :
+    (withoutVowelLength text).toList.filter (!isVowel ·) = text.toList.filter (!isVowel ·) := by
+  simpa [withoutVowelLength] using collapse_keeps_consonants text.toList none
+
 def glyphBases (word : String) : Nat := (collapseRuns (fun _ => true) none word.toList).length
 
 def vowelBeats (word : String) : Nat := (word.toList.filter isVowel).length

@@ -197,6 +197,29 @@ private def checkTimeCompaction (markdown : String) : IO Unit := do
       s!"Для «{original}» ожидается другая форма."
   IO.println s!"Время с наречиями проверено на примерах ({rows.length})."
 
+private def checkChoices (markdown : String) : IO Unit := do
+  let rows := (markdown.splitOn "\n").map cells
+  let inclusive := Logic.Connector.any
+  let exclusive := Logic.Connector.one
+  require (rows.contains ["Сколько мест посетили", s!"Подходит для `{inclusive.word}`",
+    s!"Подходит для `{exclusive.word}`"])
+    "Заголовок таблицы выбора расходится с союзами в Lean."
+  for connector in [inclusive, exclusive] do
+    let key := Phonology.withoutVowelLength connector.word
+    let resembling := Morphology.reservedForms.filter (fun word => Phonology.withoutVowelLength word == key)
+    require (resembling == [connector.word]) s!"Созвучная форма для союза «{connector.word}»: {resembling}."
+  let observations := rows.filterMap fun row => do
+    let [count, anyResult, oneResult] := row | none
+    return (← count.toNat?, anyResult, oneResult)
+  require (observations.map (fun (count, _, _) => count) == [0, 1, 2])
+    "В таблице выбора должны быть случаи с нулём, одним и двумя посещёнными местами."
+  for (count, anyResult, oneResult) in observations do
+    let choices := List.replicate count true ++ List.replicate (2 - count) false
+    let expected (connector : Logic.Connector) := if connector.eval choices then "да" else "нет"
+    require (anyResult == expected inclusive && oneResult == expected exclusive)
+      s!"Ошибка в таблице союзов при числе выбранных мест {count}."
+  IO.println "Союзы выбора: таблица маршрутов сверена с логикой."
+
 private def checkDirectives (markdown : String) : IO Unit := do
   let rows := (markdown.splitOn "\n").filterMap fun line => do
     let [address, full, short] := cells line | none
@@ -292,6 +315,7 @@ def main (args : List String) : IO Unit := do
   let adverbs ← IO.FS.readFile (vault / "Наречия.md")
   checkTemporalAdverbs adverbs
   checkTimeCompaction adverbs
+  checkChoices (← IO.FS.readFile (vault / "Подчинительные союзы.md"))
   checkDirectives (← IO.FS.readFile (vault / "Модальность.md"))
   checkGardenDialogue (← IO.FS.readFile (vault / "Разговор в саду.md"))
   checkBenchmarks (← IO.FS.readFile (vault / "Формальный анализ.md"))

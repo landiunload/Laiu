@@ -59,6 +59,33 @@ theorem flat_choice_differs_from_repeated_binary_xor :
     exactlyOne [true, true, true] ≠ binaryXor (binaryXor true true) true := by
   decide
 
+inductive Connector where
+  | all | any | one
+  deriving DecidableEq, Repr
+
+def Connector.word : Connector → String
+  | .all => "на"
+  | .any => "эу"
+  | .one => "эла"
+
+def readConnector : String → Option Connector
+  | "на" => some .all
+  | "эу" => some .any
+  | "эла" => some .one
+  | _ => none
+
+def Connector.eval : Connector → List Bool → Bool
+  | .all, choices => choices.all id
+  | .any, choices => choices.any id
+  | .one, choices => exactlyOne choices
+
+theorem read_connector_word (connector : Connector) : readConnector connector.word = some connector := by
+  cases connector <;> rfl
+
+theorem exclusive_connector_counts_whole_list (choices : List Bool) :
+    Connector.one.eval choices = true ↔ countTrue choices = 1 :=
+  exactlyOne_iff_count choices
+
 /- Only relative frames are numbered. The caller supplies the stack
    with the innermost relative frame first. Depth zero never denotes a frame. -/
 

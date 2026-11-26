@@ -8,4 +8,5 @@ import Laiu.Particles
 import Laiu.Phonology
 import Laiu.References
 import Laiu.Script
+import Laiu.Shortening
 import Laiu.Syntax

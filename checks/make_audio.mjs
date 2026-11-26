@@ -132,14 +132,8 @@ async function writeExamples(examples) {
   }
 }
 
-// Keep the same synthesis sequence before the scored material. Extra examples must
-// not change the fingerprint of a listening set used for earlier scores.
-const referenceExamples = new Set(["Сейчас.wav", "Встреча.wav"]);
-if (!isHuman) {
-  await mkdir(output, { recursive: true });
-  await writeExamples(clips.filter(([, name]) => referenceExamples.has(name)));
-}
-
+if (!isHuman) await mkdir(output, { recursive: true });
+// Generate scored recordings first so example edits cannot change their fingerprint.
 const audio = {};
 const fingerprint = createHash("sha256");
 for (const [phrase, filename] of recordings) {
@@ -153,5 +147,5 @@ for (const [phrase, filename] of recordings) {
 const data = { source: isHuman ? "human" : "synthetic", audioSet: fingerprint.digest("hex"), pairs, preference, audio };
 await writeFile(new URL("practices.js", destination), `window.laiuListening = ${JSON.stringify(data)};\n`);
 if (isHuman) await copyFile(new URL("Проба.html", output), new URL("Проба.html", destination));
-if (!isHuman) await writeExamples(clips.filter(([, name]) => !referenceExamples.has(name)));
+if (!isHuman) await writeExamples(clips);
 console.log(`Проба на слух: ${pairs.length} пар, ${recordings.size} записей.`);

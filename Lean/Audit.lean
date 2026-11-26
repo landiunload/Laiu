@@ -36,6 +36,12 @@ private def speechGroups (text : String) : List (List String) :=
 
 private def spokenTokens (text : String) : List String := (speechGroups text).flatten
 
+private def checkSpeechGroup (source : String) (words : List String) : IO Unit := do
+  if let some window := Phonology.unwantedResemblance words then
+    let phrase := String.intercalate " " words
+    let exampleText := String.intercalate " " window
+    throw (IO.userError s!"{source}: нежелательное созвучие «{exampleText}» в «{phrase}».")
+
 private def sharedVowelBoundaries (words : List String) : List (String × String) :=
   (words.zip words.tail).filter (fun (a, b) => Phonology.hasSameVowelBoundary a b)
 
@@ -65,6 +71,24 @@ private def comparison (left right : Nat) : String := s!"{left} / {right}"
 private def codeSpans : List String → List String
   | _ :: code :: rest => code :: codeSpans rest
   | _ => []
+
+private def checkSoundResemblances (vault : System.FilePath) : IO Unit := do
+  let known := Morphology.reservedForms.eraseDups
+  for word in known do
+    checkSpeechGroup "Словарь и производные" [word]
+  let mut count := 0
+  for file in ← vault.readDir do
+    if file.path.extension == some "md" then
+      let markdown ← IO.FS.readFile file.path
+      for line in markdown.splitOn "\n" do
+        for exampleText in codeSpans (line.splitOn "`") do
+          let groups := (speechGroups exampleText.toLower).filter (!·.isEmpty)
+          if !groups.isEmpty && groups.flatten.all Phonology.hasSyllableShape then
+            for group in groups do
+              checkSpeechGroup file.fileName group
+            count := count + 1
+  require (count > 0) "Не найдены примеры для проверки созвучий."
+  IO.println s!"Созвучия: проверены {known.length} слов и производных и {count} примеров в заметках."
 
 private def checkFrameExamples (markdown : String) : IO Unit := do
   let examples := (markdown.splitOn "\n").flatMap (fun line => codeSpans (line.splitOn "`"))
@@ -141,6 +165,8 @@ private def checkGardenDialogue (markdown : String) : IO Unit := do
     for word in phrase do
       require (known.contains word) s!"Реплика «{text}»: неизвестное слово «{word}»."
     require (Frames.balances phrase) s!"Реплика «{text}»: нарушены границы рамки."
+    for group in groups do
+      checkSpeechGroup "Разговор в саду.md" group
     boundaries := boundaries ++ groups.flatMap sharedVowelBoundaries
   IO.println s!"Разговор в саду: {turns.length} живых реплик сверены со словарём и рамками."
   IO.println s!"Слов в диалоге: {wordCount}."
@@ -200,4 +226,5 @@ def main (args : List String) : IO Unit := do
   checkDirectives (← IO.FS.readFile (vault / "Модальность.md"))
   checkGardenDialogue (← IO.FS.readFile (vault / "Разговор в саду.md"))
   checkBenchmarks (← IO.FS.readFile (vault / "Формальный анализ.md"))
+  checkSoundResemblances vault
   showLengthContrasts

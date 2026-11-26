@@ -21,15 +21,15 @@ def readAddressee (word : String) : Option Addressee :=
   | some .polite => some .polite
   | _ => none
 
-def renderShort (clause : Phrase) : List String := "каа" :: (render clause).tail
+def renderShort (clause : Phrase) : List String := "мо" :: (render clause).tail
 
 def renderExplicit (clause : Phrase) : List String := clause.person.word :: renderShort clause
 
 def parse (active : Option Addressee) : List String → Option Phrase
-  | "каа" :: body => do
+  | "мо" :: body => do
     let address ← active
     Syntax.parse (address.person.word :: body)
-  | subject :: "каа" :: body => Syntax.parse (subject :: body)
+  | subject :: "мо" :: body => Syntax.parse (subject :: body)
   | _ => none
 
 private theorem render_head_tail (clause : Phrase) :
@@ -37,7 +37,7 @@ private theorem render_head_tail (clause : Phrase) :
   cases clause
   rfl
 
-private theorem person_is_not_marker (person : Person) : person.word ≠ "каа" := by
+private theorem person_is_not_marker (person : Person) : person.word ≠ "мо" := by
   cases person <;> decide
 
 theorem parse_explicit (active : Option Addressee) (clause : Phrase) :
@@ -48,7 +48,7 @@ theorem parse_short (address : Addressee) (clause : Phrase) (samePerson : addres
     parse (some address) (renderShort clause) = some clause := by
   simp [renderShort, parse, samePerson, render_head_tail, parse_render]
 
-theorem short_requires_addressee (body : List String) : parse none ("каа" :: body) = none := rfl
+theorem short_requires_addressee (body : List String) : parse none ("мо" :: body) = none := rfl
 
 def compact (active : Option Addressee) (clause : Phrase) : List String :=
   match active with
@@ -110,11 +110,11 @@ theorem compact_minimal {active : Option Addressee} {written : List String} {cla
   · subst active written
     simp [compact, samePerson]
 
-example : parse (some .one) ["каа", "ли", "ки"] =
+example : parse (some .one) ["мо", "ли", "ки"] =
     some ⟨.listener, true, .neutral, .go, .implicit, false, none⟩ := by decide
-example : parse (some .one) ["ииа", "каа", "ки"] =
+example : parse (some .one) ["ииа", "мо", "ки"] =
     some ⟨.inclusive, false, .neutral, .go, .implicit, false, none⟩ := by decide
-example : parse (some .group) ["каа", "ки"] =
+example : parse (some .group) ["мо", "ки"] =
     some ⟨.youPlural, false, .neutral, .go, .implicit, false, none⟩ := by decide
 
 end Laiu.Directives

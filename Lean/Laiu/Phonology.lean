@@ -53,6 +53,31 @@ def hasSameVowelBoundary (left right : String) : Bool :=
   | some first, some second => isVowel first && first == second
   | _, _ => false
 
+/-- Selected unwanted resemblances, written using the sounds of Laiu. -/
+private def avoidedProfiles : List String :=
+  -- Russian, Spanish/Portuguese, then English (two approximations of /æ/).
+  ["каки", "кака", "сука", "пута", "путо", "паки", "пэки"]
+
+/-- Looks for complete words or runs of up to four words within one speech group. -/
+def unwantedResemblance : List String → Option (List String)
+  | [] => none
+  | first :: rest =>
+    let lengths := List.range' 1 (min 4 (rest.length + 1))
+    let windows := lengths.map ((first :: rest).take ·)
+    (windows.find? fun words => avoidedProfiles.contains (withoutVowelLength (String.join words)))
+      <|> unwantedResemblance rest
+
+example : unwantedResemblance ["а", "каа", "ки", "куа"] = some ["каа", "ки"] := by decide
+example : unwantedResemblance ["ла", "пуу", "та"] = some ["пуу", "та"] := by decide
+example : unwantedResemblance ["ииа", "мо", "ки"] = none := by decide
+example : unwantedResemblance ["мо", "ли", "ки"] = none := by decide
+
+set_option maxRecDepth 4096 in
+set_option maxHeartbeats 0 in
+theorem imperative_distinct_without_vowel_length :
+    Morphology.reservedForms.filter (fun word => withoutVowelLength word == "мо") = ["мо"] := by
+  decide
+
 set_option maxRecDepth 4096 in
 set_option maxHeartbeats 0 in
 theorem checked_forms_follow_sound_inventory_and_syllable_shape :

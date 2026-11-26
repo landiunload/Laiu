@@ -31,6 +31,9 @@ private def checkDictionary (markdown : String) : IO Unit := do
 private def tokens (text : String) : List String :=
   (text.splitOn " ").filter (!·.isEmpty)
 
+private def spokenTokens (text : String) : List String :=
+  tokens (text.replace "." " " |>.replace "," " " |>.replace "?" " " |>.replace "!" " ")
+
 private def checkNumerals (markdown : String) : IO Unit := do
   let rows := (markdown.splitOn "\n").filterMap fun line => do
     let first :: spelling :: _ := cells line | none
@@ -55,7 +58,7 @@ private def codeSpans : List String → List String
 private def checkFrameExamples (markdown : String) : IO Unit := do
   let examples := (markdown.splitOn "\n").flatMap (fun line => codeSpans (line.splitOn "`"))
   let framed := examples.filterMap fun exampleText =>
-    let phrase := tokens (exampleText.replace "." " " |>.replace "," " " |>.replace "?" " ")
+    let phrase := spokenTokens exampleText
     if phrase.length > 1 && (phrase.contains "тэ" || phrase.contains "эт") && !phrase.contains "…" then
       some (exampleText, phrase)
     else none
@@ -79,6 +82,20 @@ private def checkListeningExamples (markdown : String) : IO Unit := do
     let actual := if distinguishable then "сохраняется" else "теряется"
     require (expected == actual) s!"Проба «{left} / {right}»: различие {actual}."
   IO.println s!"Звучание: {rows.length} пар проверены при потере долготы и границ слов."
+
+private def checkGardenDialogue (markdown : String) : IO Unit := do
+  let turns := ((markdown.splitOn "\n").map cells).filter fun row =>
+    row.head? == some "А" || row.head? == some "Б"
+  require (!turns.isEmpty) "В разговоре в саду не найдены реплики."
+  let known := Morphology.reservedForms
+  for row in turns do
+    let [_, written, _] := row | throw (IO.userError s!"Неверный формат реплики: {row}.")
+    let ["", text, ""] := written.splitOn "**" | throw (IO.userError s!"Не читается реплика: {written}.")
+    let phrase := spokenTokens text
+    for word in phrase do
+      require (known.contains word) s!"Реплика «{text}»: неизвестное слово «{word}»."
+    require (Frames.balances phrase) s!"Реплика «{text}»: нарушены границы рамки."
+  IO.println s!"Разговор в саду: {turns.length} живых реплик сверены со словарём и рамками."
 
 private def checkBenchmarks (markdown : String) : IO Unit := do
   let table := (markdown.splitOn "\n").map cells
@@ -132,5 +149,6 @@ def main (args : List String) : IO Unit := do
   checkNumerals (← IO.FS.readFile (vault / "Числа.md"))
   checkFrameExamples (← IO.FS.readFile (vault / "Проверка синтаксиса.md"))
   checkListeningExamples (← IO.FS.readFile (vault / "Фонология.md"))
+  checkGardenDialogue (← IO.FS.readFile (vault / "Разговор в саду.md"))
   checkBenchmarks (← IO.FS.readFile (vault / "Формальный анализ.md"))
   showLengthContrasts

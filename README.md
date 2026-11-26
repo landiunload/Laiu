@@ -6,7 +6,7 @@
 
 [![Сборка Lean и проверки](https://github.com/landiunload/Laiu/actions/workflows/checks.yml/badge.svg)](https://github.com/landiunload/Laiu/actions/workflows/checks.yml)
 
-> **`а ми ки ин тив эм?`** — хочешь погулять в саду?  
+> **`мали, а ми ки ин тив эм?`** — привет, хочешь погулять в саду?  
 > **`ла, ии ки лу ин тив.`** — да, мы погуляем в саду.
 
 ## Принцип

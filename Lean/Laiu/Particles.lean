@@ -17,6 +17,26 @@ def Answer.correct (answer : Answer) (statement : Bool) : Bool :=
   | .confirm => statement
   | .deny => !statement
 
+inductive Courtesy where
+  | greet | thank
+  deriving DecidableEq, Repr
+
+def Courtesy.word : Courtesy → String
+  | .greet => "мали"
+  | .thank => "малу"
+
+def readCourtesy : String → Option Courtesy
+  | "мали" => some .greet
+  | "малу" => some .thank
+  | _ => none
+
+theorem read_courtesy_word (courtesy : Courtesy) : readCourtesy courtesy.word = some courtesy := by
+  cases courtesy <;> rfl
+
+theorem courtesy_uses_two_open_syllables (courtesy : Courtesy) :
+    Phonology.syllableCount courtesy.word = 2 ∧ Phonology.closedSyllableCount courtesy.word = 0 := by
+  cases courtesy <;> decide
+
 inductive Question where
   | neutral | biased (expected : Answer)
   deriving DecidableEq, Repr
@@ -206,7 +226,7 @@ theorem never_during_iff_no_occurrence (observations : List Bool) :
 set_option maxRecDepth 4096 in
 set_option maxHeartbeats 0 in
 theorem new_words_are_distinct_without_vowel_length :
-    ["лэ", "лам", "лим", "ами", "нэлу", "тиа"].all (fun word =>
+    (["лэ", "лам", "лим", "ами", "нэлу", "тиа"] ++ [Courtesy.greet.word, Courtesy.thank.word]).all (fun word =>
       (Morphology.reservedForms.filter (fun candidate =>
         Phonology.withoutVowelLength candidate == Phonology.withoutVowelLength word)) == [word]) = true := by
   decide

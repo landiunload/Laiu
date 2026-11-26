@@ -13,3 +13,4 @@ import Laiu.Script
 import Laiu.Shortening
 import Laiu.SpatialAnswers
 import Laiu.Syntax
+import Laiu.TemporalAdverbs

@@ -1,6 +1,7 @@
 import Laiu
 
 open Laiu
+open Laiu.Phonology (sharedVowelBoundaries)
 
 private def cells (line : String) : List String :=
   (line.splitOn "|").drop 1 |>.dropLast |>.map (fun cell => cell.trimAscii.toString)
@@ -41,9 +42,6 @@ private def checkSpeechGroup (source : String) (words : List String) : IO Unit :
     let phrase := String.intercalate " " words
     let exampleText := String.intercalate " " window
     throw (IO.userError s!"{source}: нежелательное созвучие «{exampleText}» в «{phrase}».")
-
-private def sharedVowelBoundaries (words : List String) : List (String × String) :=
-  (words.zip words.tail).filter (fun (a, b) => Phonology.hasSameVowelBoundary a b)
 
 private def formatBoundaries (boundaries : List (String × String)) : String :=
   String.intercalate ", " (boundaries.map fun (a, b) => s!"{a} | {b}")
@@ -149,6 +147,27 @@ private def checkPolarityAnswers (markdown : String) : IO Unit := do
       s!"Ответ «{short}» на «{question}» не даёт полной реплики «{full}»."
   IO.println s!"Ответы ла и ли: {rows.length} примеров восстановлены пословно."
 
+private def checkTemporalAdverbs (markdown : String) : IO Unit := do
+  let rows := (markdown.splitOn "\n").filterMap fun line => do
+    let [last, first, counts, preferred] := cells line | none
+    return (← codeWord last, ← codeWord first, counts, preferred)
+  require (!rows.isEmpty) "Не найдены примеры порядка наречий времени."
+  for (last, first, counts, preferred) in rows do
+    let atEnd := spokenTokens last
+    let atStart := spokenTokens first
+    let some timed := TemporalAdverbs.parse atEnd |
+      throw (IO.userError s!"Не удалось разобрать наречие в «{last}».")
+    require (TemporalAdverbs.parse atStart == some timed &&
+      TemporalAdverbs.render timed .final == atEnd && TemporalAdverbs.render timed .initial == atStart)
+      s!"«{last}» и «{first}» должны быть двумя порядками одной фразы."
+    require (counts == comparison (TemporalAdverbs.boundaryCount atEnd) (TemporalAdverbs.boundaryCount atStart))
+      s!"Неверное число стыков у «{last}» и «{first}»."
+    let actual := match TemporalAdverbs.smootherPosition timed with
+      | .initial => "в начале"
+      | .final => "в конце"
+    require (preferred == actual) s!"Для «{last}» при учёте стыков наречие ставится {actual}."
+  IO.println s!"Пары с наречиями времени ({rows.length}) сверены с разбором и стыками гласных."
+
 private def checkDirectives (markdown : String) : IO Unit := do
   let rows := (markdown.splitOn "\n").filterMap fun line => do
     let [address, full, short] := cells line | none
@@ -241,6 +260,7 @@ def main (args : List String) : IO Unit := do
   let questions ← IO.FS.readFile (vault / "Вопросительные слова.md")
   checkSpatialAnswers questions
   checkPolarityAnswers questions
+  checkTemporalAdverbs (← IO.FS.readFile (vault / "Наречия.md"))
   checkDirectives (← IO.FS.readFile (vault / "Модальность.md"))
   checkGardenDialogue (← IO.FS.readFile (vault / "Разговор в саду.md"))
   checkBenchmarks (← IO.FS.readFile (vault / "Формальный анализ.md"))

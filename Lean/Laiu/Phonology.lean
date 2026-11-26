@@ -53,6 +53,9 @@ def hasSameVowelBoundary (left right : String) : Bool :=
   | some first, some second => isVowel first && first == second
   | _, _ => false
 
+def sharedVowelBoundaries (words : List String) : List (String × String) :=
+  (words.zip words.tail).filter fun (left, right) => hasSameVowelBoundary left right
+
 /-- Selected unwanted resemblances, written using the sounds of Laiu. -/
 private def avoidedProfiles : List String :=
   -- Russian, Spanish/Portuguese, then English (two approximations of /æ/).

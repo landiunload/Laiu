@@ -22,7 +22,8 @@
     :focus-visible { outline: 3px solid #8b4e77; outline-offset: 3px; }
     .actions, .answer-options, .ratings { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
     .answer-options > button { flex: 1 1 160px; text-align: left; }
-    .ratings > label { flex: 1 1 160px; }
+    .ratings fieldset { flex: 1 1 175px; min-width: 0; border: 1px solid #dcc8c0; border-radius: 14px; margin: 0; padding: 12px; }
+    .ratings label { display: block; margin-top: 10px; }
     .ratings select { display: block; width: 100%; margin-top: 7px; }
     progress { display: block; width: 100%; accent-color: #745170; margin: 9px 0 22px; }
     .muted { color: #615469; font-size: .9rem; }
@@ -41,7 +42,7 @@
     </header>
     <section id="intro">
       <p id="about">Подготавливаются записи.</p>
-      <p>Сначала выберите услышанную фразу. Затем прослушайте два порядка слов и оцените приятность каждого.</p>
+      <p>Сначала выберите услышанную фразу. Затем прослушайте два порядка слов и оцените мягкость и приятность каждого.</p>
       <button type="button" class="primary" id="start" disabled>Начать</button>
     </section>
     <section id="recognition" hidden aria-labelledby="recognitionTitle">
@@ -58,13 +59,19 @@
       <h2 id="preferenceTitle">Как звучит каждый вариант?</h2>
       <p>Оцените оба после прослушивания. Одинаковые оценки тоже подходят.</p>
       <form id="ratingsForm">
-        <div class="actions">
-          <button type="button" id="playA">Послушать А</button>
-          <button type="button" id="playB">Послушать Б</button>
-        </div>
         <div class="ratings">
-          <label>Приятность А <select id="ratingA" required disabled></select></label>
-          <label>Приятность Б <select id="ratingB" required disabled></select></label>
+          <fieldset>
+            <legend>Вариант А</legend>
+            <button type="button" id="playA">Послушать А</button>
+            <label>Мягкость <select id="softnessA" required disabled></select></label>
+            <label>Приятность <select id="ratingA" required disabled></select></label>
+          </fieldset>
+          <fieldset>
+            <legend>Вариант Б</legend>
+            <button type="button" id="playB">Послушать Б</button>
+            <label>Мягкость <select id="softnessB" required disabled></select></label>
+            <label>Приятность <select id="ratingB" required disabled></select></label>
+          </fieldset>
         </div>
         <button class="primary" id="finish" disabled>Показать результат</button>
       </form>
@@ -89,7 +96,8 @@
     const $ = (id) => document.getElementById(id);
     const buttons = [$('first'), $('second')];
     const playRatings = [$('playA'), $('playB')];
-    const ratings = [$('ratingA'), $('ratingB')];
+    const ratingGroups = [[$('softnessA'), $('ratingA')], [$('softnessB'), $('ratingB')]];
+    const ratings = ratingGroups.flat();
     const stage = ['intro', 'recognition', 'preference', 'results'];
     let trials, answers, order, result, heard, received;
 
@@ -170,12 +178,16 @@
       };
     });
 
-    ratings.forEach((select) => {
-      select.add(new Option('Выберите оценку', ''));
-      ['1 — совсем не приятно', '2', '3', '4', '5 — очень приятно'].forEach((label, index) => {
-        select.add(new Option(label, String(index + 1)));
+    const scaleLabels = [
+      ['1 — совсем не мягко', '2', '3', '4', '5 — очень мягко'],
+      ['1 — совсем не приятно', '2', '3', '4', '5 — очень приятно'],
+    ];
+    ratingGroups.forEach((group) => {
+      group.forEach((select, metric) => {
+        select.add(new Option('Выберите оценку', ''));
+        scaleLabels[metric].forEach((label, index) => select.add(new Option(label, String(index + 1))));
+        select.onchange = () => { $('finish').disabled = !ratings.every((rating) => rating.value); };
       });
-      select.onchange = () => { $('finish').disabled = !ratings.every((rating) => rating.value); };
     });
 
     playRatings.forEach((button, index) => {
@@ -185,8 +197,8 @@
         play(order[index], () => {
           enable();
           heard[index] = true;
-          ratings[index].disabled = false;
-          ratings[index].focus();
+          ratingGroups[index].forEach((select) => { select.disabled = false; });
+          ratingGroups[index][0].focus();
         }, enable);
       };
     });
@@ -194,11 +206,16 @@
     $('ratingsForm').onsubmit = (event) => {
       event.preventDefault();
       if (!heard.every(Boolean) || !ratings.every((rating) => rating.value)) return;
-      const preference = order.map((phrase, index) => ({ phrase, rating: Number(ratings[index].value) }));
-      result = { version: 1, source: data.source, audioSet: data.audioSet, answers, preference };
+      const preference = order.map((phrase, index) => {
+        const [softness, pleasantness] = ratingGroups[index];
+        return { phrase, softness: Number(softness.value), rating: Number(pleasantness.value) };
+      });
+      result = { version: 2, source: data.source, audioSet: data.audioSet, answers, preference };
       const correct = answers.filter(({ played, answer }) => played === answer).length;
       $('score').textContent = `Распознано ${correct} из ${answers.length}`;
-      $('rated').textContent = preference.map(({ phrase, rating }) => `«${phrase}» — ${rating}/5`).join(' · ');
+      $('rated').textContent = preference.map(({ phrase, softness, rating }) =>
+        `«${phrase}» — мягкость ${softness}/5, приятность ${rating}/5`
+      ).join(' · ');
       $('scores').replaceChildren(...data.pairs.map(({ id, phrases }) => {
         const matching = answers.filter(({ pair }) => pair === id);
         const row = document.createElement('tr');

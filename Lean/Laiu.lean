@@ -7,6 +7,7 @@ import Laiu.Numbers
 import Laiu.NumberWords
 import Laiu.Particles
 import Laiu.Phonology
+import Laiu.PolarityAnswers
 import Laiu.References
 import Laiu.Script
 import Laiu.Shortening

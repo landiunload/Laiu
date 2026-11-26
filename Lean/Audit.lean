@@ -133,6 +133,22 @@ private def checkSpatialAnswers (markdown : String) : IO Unit := do
       s!"Сокращение «{full}» до «{short}» не подтверждено."
   IO.println s!"Короткие ответы: {rows.length} примера восстановлены пословно."
 
+private def checkPolarityAnswers (markdown : String) : IO Unit := do
+  let rows := (markdown.splitOn "\n").filterMap fun line => do
+    let [question, short, full, _] := cells line | none
+    return (← codeWord question, ← codeWord short, ← codeWord full)
+  require (!rows.isEmpty) "Не найдены примеры ответов ла и ли."
+  for (question, short, full) in rows do
+    let context := PolarityAnswers.readContext (spokenTokens question)
+    let fullWords := tokens full
+    let some clause := Syntax.parse fullWords |
+      throw (IO.userError s!"Не удалось разобрать полную реплику «{full}».")
+    let reply := tokens short
+    require (PolarityAnswers.recover context reply == some clause &&
+      PolarityAnswers.compact context clause == reply && reply.length < fullWords.length)
+      s!"Ответ «{short}» на «{question}» не даёт полной реплики «{full}»."
+  IO.println s!"Ответы ла и ли: {rows.length} примеров восстановлены пословно."
+
 private def checkDirectives (markdown : String) : IO Unit := do
   let rows := (markdown.splitOn "\n").filterMap fun line => do
     let [address, full, short] := cells line | none
@@ -222,7 +238,9 @@ def main (args : List String) : IO Unit := do
   checkNumerals (← IO.FS.readFile (vault / "Числа.md"))
   checkFrameExamples (← IO.FS.readFile (vault / "Проверка синтаксиса.md"))
   checkListeningExamples (← IO.FS.readFile (vault / "Фонология.md"))
-  checkSpatialAnswers (← IO.FS.readFile (vault / "Вопросительные слова.md"))
+  let questions ← IO.FS.readFile (vault / "Вопросительные слова.md")
+  checkSpatialAnswers questions
+  checkPolarityAnswers questions
   checkDirectives (← IO.FS.readFile (vault / "Модальность.md"))
   checkGardenDialogue (← IO.FS.readFile (vault / "Разговор в саду.md"))
   checkBenchmarks (← IO.FS.readFile (vault / "Формальный анализ.md"))

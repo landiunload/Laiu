@@ -57,7 +57,7 @@ inductive Phase where
 def Phase.words : Phase → List String
   | .neutral => []
   | .starts => ["тиа"]
-  | .stops => ["эо"]
+  | .stops => ["нэо"]
 
 inductive Time where
   | implicit | past | present | future
@@ -172,7 +172,7 @@ private def takeFlag (marker : String) : List String → Bool × List String
 
 private def takePhase : List String → Phase × List String
   | "тиа" :: rest => (.starts, rest)
-  | "эо" :: rest => (.stops, rest)
+  | "нэо" :: rest => (.stops, rest)
   | rest => (.neutral, rest)
 
 private def takeTravel : List String → Option (Travel × List String)

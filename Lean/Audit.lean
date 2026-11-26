@@ -202,6 +202,36 @@ private def checkDistinctWordSound (word : String) : IO Unit := do
   let resembling := Morphology.reservedForms.filter (fun form => Phonology.withoutVowelLength form == key)
   require (resembling == [word]) s!"Созвучная форма для «{word}»: {resembling}."
 
+private def checkMovementProfiles : IO Unit := do
+  let places : List Syntax.Place := [.garden, .house, .tree]
+  let relations : List Syntax.Relation := [.location, .direction, .source]
+  let settings := none :: relations.flatMap fun relation => places.map fun place => some (relation, place)
+  let people : List Syntax.Person := [.speaker, .listener, .man, .woman, .neutral,
+    .we, .inclusive, .exclusive, .youPlural, .polite, .men, .women, .neutralPlural]
+  let phrases : List Syntax.Phrase :=
+    people.flatMap fun person =>
+    [false, true].flatMap fun negative =>
+    [Syntax.Phase.neutral, .starts, .stops].flatMap fun phase =>
+    [Syntax.Travel.go, .returnTo, .move].flatMap fun travel =>
+    [Syntax.Time.implicit, .past, .present, .future].flatMap fun time =>
+    [false, true].flatMap fun result =>
+    settings.map fun spatial => ⟨person, negative, phase, travel, time, result, spatial⟩
+  let mut profiles : Std.HashMap String Syntax.Phrase := {}
+  for clause in phrases do
+    let spoken := Phonology.withoutVowelLength (String.join (Syntax.render clause))
+    if let some earlier := profiles[spoken]? then
+      let samePersonSound := Phonology.withoutVowelLength earlier.person.word ==
+        Phonology.withoutVowelLength clause.person.word
+      let samePredicate := Syntax.compact { earlier with person := .speaker } ==
+        Syntax.compact { clause with person := .speaker }
+      require (samePersonSound && samePredicate)
+        s!"Сливаются фразы движения «{String.intercalate " " (Syntax.render earlier)}» и «{String.intercalate " " (Syntax.render clause)}»."
+    else
+      profiles := profiles.insert spoken clause
+  for marker in Syntax.Phase.stops.words do
+    checkDistinctWordSound marker
+  IO.println s!"Проверка слитной речи охватывает {phrases.length} фраз движения и {profiles.size} звуковых профилей."
+
 private def checkDeixis (markdown : String) : IO Unit := do
   let grammarRows := (markdown.splitOn "\n").map cells
   let table := grammarRows.dropWhile (· != ["На что указываем", "Рядом", "Вдали"])
@@ -360,6 +390,7 @@ def main (args : List String) : IO Unit := do
   checkNumerals (← IO.FS.readFile (vault / "Числа.md"))
   checkFrameExamples (← IO.FS.readFile (vault / "Проверка синтаксиса.md"))
   checkListeningExamples (← IO.FS.readFile (vault / "Фонология.md"))
+  checkMovementProfiles
   let questions ← IO.FS.readFile (vault / "Вопросительные слова.md")
   checkSpatialAnswers questions
   checkPolarityAnswers questions

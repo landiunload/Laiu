@@ -235,6 +235,10 @@ theorem start_does_not_run_into_person (person : Syntax.Person) :
     (Syntax.Phase.starts.words.head?.map (Phonology.hasSameVowelBoundary person.word)) = some false := by
   cases person <;> decide
 
+theorem stop_does_not_run_into_person (person : Syntax.Person) :
+    (Syntax.Phase.stops.words.head?.map (Phonology.hasSameVowelBoundary person.word)) = some false := by
+  cases person <;> decide
+
 theorem conditional_words_differ_in_context (left right : String) :
     Phonology.withoutVowelLength (left ++ Logic.Conditional.openCondition.word ++ right) ≠
       Phonology.withoutVowelLength (left ++ Logic.Conditional.counterfactual.word ++ right) :=

@@ -199,7 +199,7 @@ private def readPlace : String → Option Place
   | "ти" => some .tree
   | _ => none
 
-private def readSpatial : List String → Option (Option (Relation × Place))
+def readSpatial : List String → Option (Option (Relation × Place))
   | [] => some none
   | [relation, place] => do
     let relation ← readRelation relation
@@ -269,7 +269,7 @@ private theorem takeResult_render (result : Bool) (spatial : Option (Relation ×
       rcases pair with ⟨relation, place⟩
       cases relation <;> rfl
 
-private theorem readSpatial_render (spatial : Option (Relation × Place)) :
+theorem readSpatial_render (spatial : Option (Relation × Place)) :
     readSpatial (spatialWords spatial) = some spatial := by
   cases spatial with
   | none => rfl
@@ -336,7 +336,7 @@ private theorem readPlace_rejoin {word : String} {place : Place}
     subst place
     rfl
 
-private theorem readSpatial_rejoin {words : List String} {spatial : Option (Relation × Place)}
+theorem readSpatial_rejoin {words : List String} {spatial : Option (Relation × Place)}
     (read : readSpatial words = some spatial) : spatialWords spatial = words := by
   unfold readSpatial at read
   split at read

@@ -121,9 +121,8 @@ function wave(pcm) {
   return Buffer.concat([header, pcm]);
 }
 
-if (!isHuman) {
-  await mkdir(output, { recursive: true });
-  for (const [, filename, transcript] of clips) {
+async function writeExamples(examples) {
+  for (const [, filename, transcript] of examples) {
     const pcm = Buffer.concat(transcriptLines(transcript).flatMap((line, index) => {
       const speech = synthesize(line);
       return index === 0 ? [speech] : [Buffer.alloc(sampleRate), speech];
@@ -131,6 +130,14 @@ if (!isHuman) {
     await writeFile(new URL(encodeURIComponent(filename), output), wave(pcm));
     console.log(`${filename}: ${(pcm.length / (2 * sampleRate)).toFixed(2)} с`);
   }
+}
+
+// Keep the same synthesis sequence before the scored material. Extra examples must
+// not change the fingerprint of a listening set used for earlier scores.
+const referenceExamples = new Set(["Сейчас.wav", "Встреча.wav"]);
+if (!isHuman) {
+  await mkdir(output, { recursive: true });
+  await writeExamples(clips.filter(([, name]) => referenceExamples.has(name)));
 }
 
 const audio = {};
@@ -146,4 +153,5 @@ for (const [phrase, filename] of recordings) {
 const data = { source: isHuman ? "human" : "synthetic", audioSet: fingerprint.digest("hex"), pairs, preference, audio };
 await writeFile(new URL("practices.js", destination), `window.laiuListening = ${JSON.stringify(data)};\n`);
 if (isHuman) await copyFile(new URL("Проба.html", output), new URL("Проба.html", destination));
+if (!isHuman) await writeExamples(clips.filter(([, name]) => !referenceExamples.has(name)));
 console.log(`Проба на слух: ${pairs.length} пар, ${recordings.size} записей.`);

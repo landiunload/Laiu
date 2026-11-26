@@ -94,6 +94,21 @@ private def checkListeningExamples (markdown : String) : IO Unit := do
     require (expected == actual) s!"Проба «{left} / {right}»: различие {actual}."
   IO.println s!"Звучание: {rows.length} пар проверены при потере долготы и границ слов."
 
+private def checkSpatialAnswers (markdown : String) : IO Unit := do
+  let rows := (markdown.splitOn "\n").filterMap fun line => do
+    let [question, full, short] := cells line | none
+    return (← codeWord question, ← codeWord full, ← codeWord short)
+  require (!rows.isEmpty) "Не найдены короткие ответы на пространственные вопросы."
+  for (question, full, short) in rows do
+    let context := SpatialAnswers.readQuestion (spokenTokens question)
+    let fullWords := tokens full
+    let shortWords := tokens short
+    require (SpatialAnswers.recover context shortWords == some fullWords)
+      s!"Ответ «{short}» на «{question}» не даёт полной реплики «{full}»."
+    require (SpatialAnswers.compact context fullWords == shortWords && shortWords.length < fullWords.length)
+      s!"Сокращение «{full}» до «{short}» не подтверждено."
+  IO.println s!"Короткие ответы: {rows.length} примера восстановлены пословно."
+
 private def checkGardenDialogue (markdown : String) : IO Unit := do
   let turns := ((markdown.splitOn "\n").map cells).filter fun row =>
     row.head? == some "А" || row.head? == some "Б"
@@ -165,6 +180,7 @@ def main (args : List String) : IO Unit := do
   checkNumerals (← IO.FS.readFile (vault / "Числа.md"))
   checkFrameExamples (← IO.FS.readFile (vault / "Проверка синтаксиса.md"))
   checkListeningExamples (← IO.FS.readFile (vault / "Фонология.md"))
+  checkSpatialAnswers (← IO.FS.readFile (vault / "Вопросительные слова.md"))
   checkGardenDialogue (← IO.FS.readFile (vault / "Разговор в саду.md"))
   checkBenchmarks (← IO.FS.readFile (vault / "Формальный анализ.md"))
   showLengthContrasts

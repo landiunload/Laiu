@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Проба на слух · Laiu</title>
+  <style>
+    :root { color-scheme: light; font: 17px/1.55 system-ui, sans-serif; color: #292330; background: #f7f1e8; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: clamp(16px, 5vw, 64px); }
+    main { max-width: 660px; margin: 0 auto; padding: clamp(18px, 5vw, 44px); border: 1px solid #dcc8c0; border-radius: 24px; background: #fffaf4; }
+    h1 { margin: 0; font: 600 clamp(32px, 8vw, 51px)/1.1 Georgia, serif; }
+    h2 { margin: 0 0 12px; font-size: 1.3rem; }
+    p { margin: 0 0 18px; }
+    header { border-bottom: 1px solid #dcc8c0; margin-bottom: 26px; padding-bottom: 19px; }
+    header p { margin: 7px 0 0; color: #615469; }
+    button, select { font: inherit; border: 1px solid #8b6d82; border-radius: 12px; padding: 10px 15px; min-height: 46px; background: #fffaf4; color: inherit; }
+    button { cursor: pointer; }
+    button.primary { background: #583c50; color: white; }
+    button:hover:enabled { box-shadow: inset 0 0 0 2px #8b6d82; }
+    button:disabled, select:disabled { opacity: .55; cursor: default; }
+    :focus-visible { outline: 3px solid #8b4e77; outline-offset: 3px; }
+    .actions, .answer-options, .ratings { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
+    .answer-options > button { flex: 1 1 160px; text-align: left; }
+    .ratings > label { flex: 1 1 160px; }
+    .ratings select { display: block; width: 100%; margin-top: 7px; }
+    progress { display: block; width: 100%; accent-color: #745170; margin: 9px 0 22px; }
+    .muted { color: #615469; font-size: .9rem; }
+    #message { color: #8a3744; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; text-align: left; }
+    th, td { border-bottom: 1px solid #dcc8c0; padding: 7px 5px; vertical-align: top; }
+    [hidden] { display: none !important; }
+  </style>
+  <script src="practices.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Проба на слух</h1>
+      <p>Звучание Laiu</p>
+    </header>
+    <section id="intro">
+      <p id="about">Подготавливаются записи.</p>
+      <p>Сначала выберите услышанную фразу. Затем прослушайте два порядка слов и оцените приятность каждого.</p>
+      <button type="button" class="primary" id="start" disabled>Начать</button>
+    </section>
+    <section id="recognition" hidden aria-labelledby="recognitionTitle">
+      <h2 id="recognitionTitle">Что прозвучало?</h2>
+      <p id="count" class="muted" aria-live="polite"></p>
+      <progress id="progress" aria-label="Вопросы с ответами" value="0"></progress>
+      <button type="button" class="primary" id="play">Послушать</button>
+      <div class="answer-options">
+        <button type="button" id="first" disabled></button>
+        <button type="button" id="second" disabled></button>
+      </div>
+    </section>
+    <section id="preference" hidden aria-labelledby="preferenceTitle">
+      <h2 id="preferenceTitle">Как звучит каждый вариант?</h2>
+      <p>Оцените оба после прослушивания. Одинаковые оценки тоже подходят.</p>
+      <form id="ratingsForm">
+        <div class="actions">
+          <button type="button" id="playA">Послушать А</button>
+          <button type="button" id="playB">Послушать Б</button>
+        </div>
+        <div class="ratings">
+          <label>Приятность А <select id="ratingA" required disabled></select></label>
+          <label>Приятность Б <select id="ratingB" required disabled></select></label>
+        </div>
+        <button class="primary" id="finish" disabled>Показать результат</button>
+      </form>
+    </section>
+    <section id="results" hidden aria-labelledby="score">
+      <h2 id="score" tabindex="-1"></h2>
+      <p id="rated"></p>
+      <table>
+        <thead><tr><th scope="col">Пара</th><th scope="col">Верно</th></tr></thead>
+        <tbody id="scores"></tbody>
+      </table>
+      <div class="actions">
+        <button type="button" id="save" class="primary">Скачать ответы</button>
+        <button type="button" id="restart">Пройти ещё раз</button>
+      </div>
+    </section>
+    <p id="message" role="alert" hidden></p>
+    <audio id="audio" preload="none"></audio>
+    <noscript>Для воспроизведения и подсчёта включите JavaScript.</noscript>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const buttons = [$('first'), $('second')];
+    const playRatings = [$('playA'), $('playB')];
+    const ratings = [$('ratingA'), $('ratingB')];
+    const stage = ['intro', 'recognition', 'preference', 'results'];
+    let trials, answers, order, result, heard, received;
+
+    function shuffle(items) {
+      const copy = [...items];
+      for (let i = copy.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      return copy;
+    }
+
+    function show(section) {
+      stage.forEach((part) => { $(part).hidden = part !== section; });
+      $('message').hidden = true;
+    }
+
+    function play(phrase, onEnd, onFailure) {
+      $('message').hidden = true;
+      $('audio').src = data.audio[phrase];
+      $('audio').onended = onEnd;
+      $('audio').play().catch(() => {
+        $('message').textContent = 'Запись не воспроизвелась. Попробуйте ещё раз.';
+        $('message').hidden = false;
+        onFailure();
+      });
+    }
+
+    function next() {
+      if (answers.length === trials.length) {
+        show('preference');
+        playRatings[0].focus();
+        return;
+      }
+      const trial = trials[answers.length];
+      $('count').textContent = `${answers.length + 1} из ${trials.length}`;
+      $('progress').value = answers.length;
+      buttons.forEach((button, index) => {
+        button.textContent = trial.options[index];
+        button.disabled = true;
+      });
+      $('play').textContent = 'Послушать';
+      $('play').disabled = false;
+      received = 0;
+      $('play').focus();
+    }
+
+    function start() {
+      trials = shuffle(data.pairs.flatMap(({ id, phrases }) => phrases.map((phrase) =>
+        ({ id, phrase, options: shuffle(phrases) }))));
+      order = shuffle(data.preference);
+      answers = [];
+      heard = [false, false];
+      ratings.forEach((select) => { select.disabled = true; select.value = ''; });
+      $('finish').disabled = true;
+      $('progress').max = trials.length;
+      show('recognition');
+      next();
+    }
+
+    $('play').onclick = () => {
+      $('play').disabled = true;
+      buttons.forEach((button) => { button.disabled = true; });
+      play(trials[answers.length].phrase, () => {
+        received++;
+        $('play').disabled = false;
+        $('play').textContent = 'Повторить';
+        buttons.forEach((button) => { button.disabled = false; });
+        buttons[0].focus();
+      }, () => { $('play').disabled = false; });
+    };
+
+    buttons.forEach((button, index) => {
+      button.onclick = () => {
+        const { id, phrase, options } = trials[answers.length];
+        answers.push({ pair: id, played: phrase, answer: options[index], plays: received });
+        next();
+      };
+    });
+
+    ratings.forEach((select) => {
+      select.add(new Option('Выберите оценку', ''));
+      ['1 — совсем не приятно', '2', '3', '4', '5 — очень приятно'].forEach((label, index) => {
+        select.add(new Option(label, String(index + 1)));
+      });
+      select.onchange = () => { $('finish').disabled = !ratings.every((rating) => rating.value); };
+    });
+
+    playRatings.forEach((button, index) => {
+      button.onclick = () => {
+        const enable = () => { playRatings.forEach((button) => { button.disabled = false; }); };
+        playRatings.forEach((button) => { button.disabled = true; });
+        play(order[index], () => {
+          enable();
+          heard[index] = true;
+          ratings[index].disabled = false;
+          ratings[index].focus();
+        }, enable);
+      };
+    });
+
+    $('ratingsForm').onsubmit = (event) => {
+      event.preventDefault();
+      if (!heard.every(Boolean) || !ratings.every((rating) => rating.value)) return;
+      const preference = order.map((phrase, index) => ({ phrase, rating: Number(ratings[index].value) }));
+      result = { version: 1, source: data.source, audioSet: data.audioSet, answers, preference };
+      const correct = answers.filter(({ played, answer }) => played === answer).length;
+      $('score').textContent = `Распознано ${correct} из ${answers.length}`;
+      $('rated').textContent = preference.map(({ phrase, rating }) => `«${phrase}» — ${rating}/5`).join(' · ');
+      $('scores').replaceChildren(...data.pairs.map(({ id, phrases }) => {
+        const matching = answers.filter(({ pair }) => pair === id);
+        const row = document.createElement('tr');
+        row.insertCell().textContent = phrases.join(' / ');
+        row.insertCell().textContent = `${matching.filter(({ played, answer }) => played === answer).length} из ${matching.length}`;
+        return row;
+      }));
+      show('results');
+      $('score').focus();
+    };
+
+    $('save').onclick = () => {
+      const url = URL.createObjectURL(new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'laiu-listening-results.json';
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+
+    $('restart').onclick = start;
+    $('start').onclick = start;
+    let data;
+    document.addEventListener('DOMContentLoaded', () => {
+      data = window.laiuListening;
+      if (!data) {
+        $('about').textContent = 'Откройте страницу из папки «Звучание» скачанного репозитория, где лежит practices.js.';
+        return;
+      }
+      $('about').textContent = data.source === 'human'
+        ? 'В этой пробе звучат записи живой речи. Ответы сохраняются на вашем устройстве.'
+        : 'В этой пробе звучит синтетический голос. Результат относится к этим записям. Ответы остаются у вас.';
+      $('start').disabled = false;
+    });
+  </script>
+</body>
+</html>

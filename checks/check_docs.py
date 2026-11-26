@@ -1,7 +1,10 @@
-"""Check links shared by the GitHub README, Obsidian notes, and canvas."""
+"""Check links and listening material shared by GitHub and Obsidian."""
 
+import base64
+import io
 import json
 import re
+import wave
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -72,9 +75,42 @@ def check_canvas():
     return len(nodes), errors
 
 
+def check_listening_material():
+    audio_dir = ROOT / "Звучание"
+    notes = (ROOT / "Фонология.md").read_text(encoding="utf-8")
+    pairs = re.findall(r"^\| `([^`\n]+)` \| `([^`\n]+)` \| (?:сохраняется|теряется) \|$", notes, re.MULTILINE)
+    _, marker, after_marker = notes.partition("![[Звучание/Сейчас.wav]]\n")
+    if not marker:
+        raise ValueError("В фонологии нет аудиопримера с двумя порядками слов")
+    order_example = after_marker.split("\n>\n", 1)[0]
+    order = re.findall(r"\*\*`([^`]+)`\*\*", order_example)
+    script = (audio_dir / "practices.js").read_text(encoding="utf-8").strip()
+    prefix = "window.laiuListening = "
+    if not script.startswith(prefix) or not script.endswith(";"):
+        raise ValueError("Немашиночитаемый набор записей practices.js")
+    trial = json.loads(script[len(prefix):-1])
+    if trial["source"] != "synthetic":
+        raise ValueError("Публичная проба должна использовать синтетический набор")
+    if [tuple(item["phrases"]) for item in trial["pairs"]] != pairs or trial["preference"] != order:
+        raise ValueError("Фразы пробы расходятся с фонологией")
+    phrases = {phrase for pair in pairs for phrase in pair} | set(order)
+    if set(trial["audio"]) != phrases:
+        raise ValueError("Набор WAV не соответствует фразам пробы")
+    for phrase, uri in trial["audio"].items():
+        audio_prefix = "data:audio/wav;base64,"
+        if not uri.startswith(audio_prefix):
+            raise ValueError(f"Фраза «{phrase}» должна содержать локальную WAV-запись")
+        decoded = base64.b64decode(uri[len(audio_prefix):], validate=True)
+        with wave.open(io.BytesIO(decoded)) as audio:
+            if audio.getnframes() <= 0:
+                raise ValueError(f"Пустая запись для «{phrase}»")
+    return len(phrases)
+
+
 if __name__ == "__main__":
     link_count, note_errors = check_notes()
     node_count, canvas_errors = check_canvas()
     if errors := note_errors + canvas_errors:
         raise SystemExit("\n".join(errors))
     print(f"Справочник: {link_count} ссылок и {node_count} узлов карты проверены.")
+    print(f"Проба на слух: {check_listening_material()} WAV-записей совпадают со списком фраз.")

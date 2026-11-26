@@ -100,16 +100,19 @@ private def checkGardenDialogue (markdown : String) : IO Unit := do
   require (!turns.isEmpty) "В разговоре в саду не найдены реплики."
   let known := Morphology.reservedForms
   let mut boundaries := []
+  let mut wordCount := 0
   for row in turns do
     let [_, written, _] := row | throw (IO.userError s!"Неверный формат реплики: {row}.")
     let ["", text, ""] := written.splitOn "**" | throw (IO.userError s!"Не читается реплика: {written}.")
     let groups := speechGroups text
     let phrase := groups.flatten
+    wordCount := wordCount + phrase.length
     for word in phrase do
       require (known.contains word) s!"Реплика «{text}»: неизвестное слово «{word}»."
     require (Frames.balances phrase) s!"Реплика «{text}»: нарушены границы рамки."
     boundaries := boundaries ++ groups.flatMap sharedVowelBoundaries
   IO.println s!"Разговор в саду: {turns.length} живых реплик сверены со словарём и рамками."
+  IO.println s!"Слов в диалоге: {wordCount}."
   IO.println s!"Стыки одинаковых гласных в диалоге ({boundaries.length}): {formatBoundaries boundaries}."
 
 private def checkBenchmarks (markdown : String) : IO Unit := do

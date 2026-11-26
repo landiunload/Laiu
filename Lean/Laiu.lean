@@ -1,3 +1,4 @@
+import Laiu.Directives
 import Laiu.Frames
 import Laiu.Lexicon
 import Laiu.Logic

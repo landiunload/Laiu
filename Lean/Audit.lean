@@ -109,6 +109,22 @@ private def checkSpatialAnswers (markdown : String) : IO Unit := do
       s!"Сокращение «{full}» до «{short}» не подтверждено."
   IO.println s!"Короткие ответы: {rows.length} примера восстановлены пословно."
 
+private def checkDirectives (markdown : String) : IO Unit := do
+  let rows := (markdown.splitOn "\n").filterMap fun line => do
+    let [address, full, short] := cells line | none
+    return (← codeWord address, ← codeWord full, ← codeWord short)
+  require (!rows.isEmpty) "В модальности не найдены примеры кратких побуждений."
+  for (address, full, short) in rows do
+    let some addressee := Directives.readAddressee address |
+      throw (IO.userError s!"Неизвестный адресат «{address}».")
+    let active := some addressee
+    let some clause := Directives.parse active (tokens full) |
+      throw (IO.userError s!"Не удалось разобрать побуждение «{full}».")
+    let shortened := tokens short
+    require (Directives.parse active shortened == some clause && Directives.compact active clause == shortened)
+      s!"«{short}» не сохраняет разбор «{full}» для адресата «{address}»."
+  IO.println s!"Проверены примеры побуждений ({rows.length}). Адресат и действие сохраняются."
+
 private def checkGardenDialogue (markdown : String) : IO Unit := do
   let turns := ((markdown.splitOn "\n").map cells).filter fun row =>
     row.head? == some "А" || row.head? == some "Б"
@@ -181,6 +197,7 @@ def main (args : List String) : IO Unit := do
   checkFrameExamples (← IO.FS.readFile (vault / "Проверка синтаксиса.md"))
   checkListeningExamples (← IO.FS.readFile (vault / "Фонология.md"))
   checkSpatialAnswers (← IO.FS.readFile (vault / "Вопросительные слова.md"))
+  checkDirectives (← IO.FS.readFile (vault / "Модальность.md"))
   checkGardenDialogue (← IO.FS.readFile (vault / "Разговор в саду.md"))
   checkBenchmarks (← IO.FS.readFile (vault / "Формальный анализ.md"))
   showLengthContrasts

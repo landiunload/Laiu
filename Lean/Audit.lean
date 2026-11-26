@@ -31,8 +31,19 @@ private def checkDictionary (markdown : String) : IO Unit := do
 private def tokens (text : String) : List String :=
   (text.splitOn " ").filter (!·.isEmpty)
 
-private def spokenTokens (text : String) : List String :=
-  tokens (text.replace "." " " |>.replace "," " " |>.replace "?" " " |>.replace "!" " ")
+private def speechGroups (text : String) : List (List String) :=
+  (text.toList.splitOnP (fun c => ['.', ',', '?', '!'].contains c)).map (tokens ∘ String.ofList)
+
+private def spokenTokens (text : String) : List String := (speechGroups text).flatten
+
+private def sharedVowelBoundaries (words : List String) : List (String × String) :=
+  (words.zip words.tail).filter (fun (a, b) => Phonology.hasSameVowelBoundary a b)
+
+private def formatBoundaries (boundaries : List (String × String)) : String :=
+  String.intercalate ", " (boundaries.map fun (a, b) => s!"{a} | {b}")
+
+#guard sharedVowelBoundaries ["а", "ки", "ииу", "эм"] == [("ки", "ииу")]
+#guard (sharedVowelBoundaries ["ииу", "а", "ки", "эм"]).isEmpty
 
 private def checkNumerals (markdown : String) : IO Unit := do
   let rows := (markdown.splitOn "\n").filterMap fun line => do
@@ -88,14 +99,18 @@ private def checkGardenDialogue (markdown : String) : IO Unit := do
     row.head? == some "А" || row.head? == some "Б"
   require (!turns.isEmpty) "В разговоре в саду не найдены реплики."
   let known := Morphology.reservedForms
+  let mut boundaries := []
   for row in turns do
     let [_, written, _] := row | throw (IO.userError s!"Неверный формат реплики: {row}.")
     let ["", text, ""] := written.splitOn "**" | throw (IO.userError s!"Не читается реплика: {written}.")
-    let phrase := spokenTokens text
+    let groups := speechGroups text
+    let phrase := groups.flatten
     for word in phrase do
       require (known.contains word) s!"Реплика «{text}»: неизвестное слово «{word}»."
     require (Frames.balances phrase) s!"Реплика «{text}»: нарушены границы рамки."
+    boundaries := boundaries ++ groups.flatMap sharedVowelBoundaries
   IO.println s!"Разговор в саду: {turns.length} живых реплик сверены со словарём и рамками."
+  IO.println s!"Стыки одинаковых гласных в диалоге ({boundaries.length}): {formatBoundaries boundaries}."
 
 private def checkBenchmarks (markdown : String) : IO Unit := do
   let table := (markdown.splitOn "\n").map cells
@@ -119,15 +134,13 @@ private def checkBenchmarks (markdown : String) : IO Unit := do
   require (totals == [["Всего", toString rows.length, totalLetters, totalWords]])
     s!"Строка «Всего»: ожидается {rows.length}, {totalLetters} букв, {totalWords} слов."
   let laiuWords := left.flatMap tokens
-  let boundaries := left.flatMap fun phrase =>
-    let words := tokens phrase
-    (words.zip words.tail).filter (fun (a, b) => Phonology.hasSameVowelBoundary a b)
+  let boundaries := left.flatMap (sharedVowelBoundaries ∘ tokens)
   IO.println s!"Краткость: {rows.length} фраз, буквы {totalLetters}, слова {totalWords} (Laiu / русский)."
   IO.println s!"Laiu: {(laiuWords.map Phonology.glyphBases).sum} основных знаков письма, {(laiuWords.map Phonology.vowelBeats).sum} гласных долей."
   let syllables := (laiuWords.map Phonology.syllableCount).sum
   let closed := (laiuWords.map Phonology.closedSyllableCount).sum
   IO.println s!"Слоги Laiu: {syllables - closed} открытых и {closed} закрытых."
-  IO.println s!"Стыки одинаковых гласных ({boundaries.length}): {String.intercalate ", " (boundaries.map fun (a, b) => s!"{a} | {b}")}."
+  IO.println s!"Стыки одинаковых гласных ({boundaries.length}): {formatBoundaries boundaries}."
 
 private def showLengthContrasts : IO Unit := do
   let forms := Lexicon.forms Lexicon.entries

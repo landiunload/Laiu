@@ -235,6 +235,11 @@ theorem start_does_not_run_into_person (person : Syntax.Person) :
     (Syntax.Phase.starts.words.head?.map (Phonology.hasSameVowelBoundary person.word)) = some false := by
   cases person <;> decide
 
+theorem conditional_words_differ_in_context (left right : String) :
+    Phonology.withoutVowelLength (left ++ Logic.Conditional.openCondition.word ++ right) ≠
+      Phonology.withoutVowelLength (left ++ Logic.Conditional.counterfactual.word ++ right) :=
+  Phonology.distinct_consonant_counts_survive_in_context _ _ left right (by decide)
+
 example : Syntax.parse ["и", "тиа", "ки"] =
     some ⟨.speaker, false, .starts, .go, .implicit, false, none⟩ := by decide
 

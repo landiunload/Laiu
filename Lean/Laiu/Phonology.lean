@@ -46,6 +46,15 @@ theorem duration_loss_preserves_consonants (text : String) :
     (withoutVowelLength text).toList.filter (!isVowel ·) = text.toList.filter (!isVowel ·) := by
   simpa [withoutVowelLength] using collapse_keeps_consonants text.toList none
 
+theorem distinct_consonant_counts_survive_in_context (first second left right : String)
+    (different : (first.toList.filter (!isVowel ·)).length ≠ (second.toList.filter (!isVowel ·)).length) :
+    withoutVowelLength (left ++ first ++ right) ≠ withoutVowelLength (left ++ second ++ right) := by
+  intro same
+  have count := congrArg (fun text : String => (text.toList.filter (!isVowel ·)).length) same
+  simp only [duration_loss_preserves_consonants, String.toList_append, List.filter_append,
+    List.length_append] at count
+  omega
+
 def glyphBases (word : String) : Nat := (collapseRuns (fun _ => true) none word.toList).length
 
 def vowelBeats (word : String) : Nat := (word.toList.filter isVowel).length

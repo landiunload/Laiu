@@ -197,6 +197,39 @@ private def checkTimeCompaction (markdown : String) : IO Unit := do
       s!"Для «{original}» ожидается другая форма."
   IO.println s!"Время с наречиями проверено на примерах ({rows.length})."
 
+private def checkDistinctWordSound (word : String) : IO Unit := do
+  let key := Phonology.withoutVowelLength word
+  let resembling := Morphology.reservedForms.filter (fun form => Phonology.withoutVowelLength form == key)
+  require (resembling == [word]) s!"Созвучная форма для «{word}»: {resembling}."
+
+private def checkConditionals (markdown : String) : IO Unit := do
+  let rows := (markdown.splitOn "\n").filterMap fun line => do
+    let [connector, kind, exampleText, _] := cells line | none
+    return (← codeWord connector, kind, ← codeWord exampleText)
+  let [(plain, _, first), (irrealis, _, second)] := rows |
+    throw (IO.userError "Нужны две сопоставимые реплики с условием.")
+  require (Logic.readConditional plain == some .openCondition &&
+    Logic.readConditional irrealis == some .counterfactual)
+    "Союзы условия расходятся со словарём Lean."
+  for (marker, kind, utterance) in rows do
+    checkDistinctWordSound marker
+    let some connector := Logic.readConditional marker |
+      throw (IO.userError s!"Неизвестный условный союз «{marker}».")
+    let [opening, result] := (speechGroups utterance).filter (!·.isEmpty) |
+      throw (IO.userError s!"Ожидаются условие и следствие в «{utterance}».")
+    let expected := match connector with
+      | .openCondition => "открытое"
+      | .counterfactual => "контрфактическое"
+    require (opening.head? == some marker && !opening.tail.isEmpty && !result.isEmpty &&
+      expected == kind)
+      s!"Тип условия или союз в «{utterance}» указан неверно."
+  let content (utterance : String) := match speechGroups utterance with
+    | opening :: rest => opening.tail :: rest
+    | [] => []
+  require (content first == content second)
+    "Примеры должны различаться только условным союзом."
+  IO.println "Условные союзы: реплики сверены с моделью и словарём."
+
 private def checkChoices (markdown : String) : IO Unit := do
   let rows := (markdown.splitOn "\n").map cells
   let inclusive := Logic.Connector.any
@@ -205,9 +238,7 @@ private def checkChoices (markdown : String) : IO Unit := do
     s!"Подходит для `{exclusive.word}`"])
     "Заголовок таблицы выбора расходится с союзами в Lean."
   for connector in [inclusive, exclusive] do
-    let key := Phonology.withoutVowelLength connector.word
-    let resembling := Morphology.reservedForms.filter (fun word => Phonology.withoutVowelLength word == key)
-    require (resembling == [connector.word]) s!"Созвучная форма для союза «{connector.word}»: {resembling}."
+    checkDistinctWordSound connector.word
   let observations := rows.filterMap fun row => do
     let [count, anyResult, oneResult] := row | none
     return (← count.toNat?, anyResult, oneResult)
@@ -315,7 +346,9 @@ def main (args : List String) : IO Unit := do
   let adverbs ← IO.FS.readFile (vault / "Наречия.md")
   checkTemporalAdverbs adverbs
   checkTimeCompaction adverbs
-  checkChoices (← IO.FS.readFile (vault / "Подчинительные союзы.md"))
+  let connectors ← IO.FS.readFile (vault / "Подчинительные союзы.md")
+  checkConditionals connectors
+  checkChoices connectors
   checkDirectives (← IO.FS.readFile (vault / "Модальность.md"))
   checkGardenDialogue (← IO.FS.readFile (vault / "Разговор в саду.md"))
   checkBenchmarks (← IO.FS.readFile (vault / "Формальный анализ.md"))

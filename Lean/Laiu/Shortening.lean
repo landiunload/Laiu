@@ -116,10 +116,7 @@ theorem choice_connectors_have_two_open_syllables :
 theorem choice_connectors_differ_in_context (left right : String) :
     Phonology.withoutVowelLength (left ++ Logic.Connector.any.word ++ right) ≠
       Phonology.withoutVowelLength (left ++ Logic.Connector.one.word ++ right) := by
-  intro same
-  have count := congrArg (fun text : String => (text.toList.filter (!Phonology.isVowel ·)).length) same
-  rw [Phonology.duration_loss_preserves_consonants, Phonology.duration_loss_preserves_consonants] at count
-  simp [Logic.Connector.word, String.toList_append, Phonology.isVowel, Lexicon.vowels] at count
+  exact Phonology.distinct_consonant_counts_survive_in_context _ _ left right (by decide)
 
 example : renderNegation (2 % 2) ["ки"] = ["ки"] := rfl
 example : renderChain .all [["а", "ки"], ["у", "но"], ["о", "мит"]] =

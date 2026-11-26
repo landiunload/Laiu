@@ -86,6 +86,23 @@ theorem exclusive_connector_counts_whole_list (choices : List Bool) :
     Connector.one.eval choices = true ↔ countTrue choices = 1 :=
   exactlyOne_iff_count choices
 
+inductive Conditional where
+  | openCondition | counterfactual
+  deriving DecidableEq, Repr
+
+def Conditional.word : Conditional → String
+  | .openCondition => "им"
+  | .counterfactual => "ним"
+
+def readConditional : String → Option Conditional
+  | "им" => some .openCondition
+  | "ним" => some .counterfactual
+  | _ => none
+
+theorem read_conditional_word (conditional : Conditional) :
+    readConditional conditional.word = some conditional := by
+  cases conditional <;> rfl
+
 /- Only relative frames are numbered. The caller supplies the stack
    with the innermost relative frame first. Depth zero never denotes a frame. -/
 

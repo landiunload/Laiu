@@ -165,6 +165,27 @@ private def checkSpatialAnswers (markdown : String) : IO Unit := do
       s!"Сокращение «{full}» до «{short}» не подтверждено."
   IO.println s!"Короткие ответы: {rows.length} примера восстановлены пословно."
 
+private def checkTransferAnswers (markdown : String) : IO Unit := do
+  let sectionLines := (markdown.splitOn "\n").dropWhile (fun line =>
+    line.trimAscii.toString != "### Короткие ответы о передаче")
+  let rows := (sectionLines.tail.takeWhile (!·.startsWith "#")).filterMap fun line => do
+    let [question, full, short, _] := cells line | none
+    return (← codeWord question, ← codeWord full, ← codeWord short)
+  require (!rows.isEmpty) "Не найдены короткие ответы о передаче."
+  let mut removed := 0
+  for (question, full, short) in rows do
+    let some context := TransferAnswers.readQuestion (spokenTokens question) |
+      throw (IO.userError s!"Не удалось прочитать вопрос о передаче «{question}».")
+    let shortWords := spokenTokens short
+    let fullWords := spokenTokens full
+    require (TransferAnswers.recover (some context) shortWords == some fullWords &&
+      TransferAnswers.recover (some context) (context.role.marker :: shortWords) == some fullWords &&
+      TransferAnswers.compact (some context) fullWords == shortWords &&
+      shortWords.length == 1)
+      s!"Ответ «{short}» на «{question}» не восстанавливает «{full}»."
+    removed := removed + (Phonology.sharedVowelBoundaries fullWords).length
+  IO.println s!"Передача: восстановлено коротких ответов — {rows.length}, убрано стыков — {removed}."
+
 private def checkPolarityAnswers (markdown : String) : IO Unit := do
   let rows := (markdown.splitOn "\n").filterMap fun line => do
     let [question, short, full, _] := cells line | none
@@ -552,6 +573,7 @@ def main (args : List String) : IO Unit := do
   let questions ← IO.FS.readFile (vault / "Вопросительные слова.md")
   checkSpatialAnswers questions
   checkPolarityAnswers questions
+  checkTransferAnswers (← IO.FS.readFile (vault / "Обладание и передача.md"))
   let adverbs ← IO.FS.readFile (vault / "Наречия.md")
   checkTemporalAdverbs adverbs
   checkTimeCompaction adverbs

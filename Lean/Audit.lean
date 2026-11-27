@@ -491,6 +491,44 @@ private def checkReplyProfiles : IO Unit := do
           checkSpeechGroup "Короткие ответы о движении" reply
   IO.println s!"Поправки о движении: {checked} случаев, убрано слов — {saved}, совпадений разных смыслов и новых повторных стыков нет."
 
+private def checkCoordinationProfiles : IO Unit := do
+  let times : List Syntax.Time := [.implicit, .past, .present, .future]
+  let people : List Syntax.Person := [.speaker, .listener, .man]
+  let connectors : List Logic.Connector := [.all, .any, .one]
+  let clauses := movementPhrases times
+  let mut checked := 0
+  let mut shortened := 0
+  let mut clearer := 0
+  for person in people do
+    let endings := clauses.filter (·.person == person)
+    for time in times do
+      let first : Syntax.Phrase := ⟨person, false, .neutral, .go, time, false, some (.location, .garden)⟩
+      let middle : Syntax.Phrase := ⟨person, false, .neutral, .returnTo, time, false, some (.direction, .house)⟩
+      for connector in connectors do
+        let mut profiles : Std.HashMap String Syntax.Phrase := {}
+        for ending in endings do
+          let chain : Coordination.Chain := ⟨first, [middle, ending]⟩
+          let full := Coordination.renderFull connector chain
+          let short := Coordination.compact connector chain
+          require (Coordination.parse connector short == some chain &&
+            short.length ≤ full.length &&
+            (sharedVowelBoundaries short).length ≤ (sharedVowelBoundaries full).length &&
+            (Phonology.sharedConsonantBoundaries short).length ≤
+              (Phonology.sharedConsonantBoundaries full).length)
+            s!"В ряду «{String.intercalate " " short}» изменился смысл, длина или стык."
+          let profile := Phonology.withoutSoundLength (String.join short)
+          let meaning := Syntax.compact ending
+          if let some earlier := profiles[profile]? then
+            require (earlier == meaning)
+              s!"Сливаются окончания ряда «{String.intercalate " " (Syntax.render earlier)}» и «{String.intercalate " " (Syntax.render ending)}»."
+          else
+            profiles := profiles.insert profile meaning
+          checked := checked + 1
+          if short.length < full.length then shortened := shortened + 1
+          else if short != full then clearer := clearer + 1
+          checkSpeechGroup "Ряды действий о движении" short
+  IO.println s!"Ряды из трёх действий: {checked} случаев; короче — {shortened}; меньше повторных стыков при той же длине — {clearer}."
+
 private def checkTimeClarificationProfiles : IO Unit := do
   let clauses := movementPhrases [.past, .future]
   let questions : List (Option Particles.Question) :=
@@ -710,6 +748,26 @@ private def checkChoices (markdown : String) : IO Unit := do
       s!"Ошибка в таблице союзов при числе выбранных мест {count}."
   IO.println "Союзы выбора: таблица маршрутов сверена с логикой."
 
+private def checkCoordination (markdown : String) : IO Unit := do
+  let lines := (markdown.splitOn "\n").dropWhile fun line =>
+    line.trimAscii.toString != "### Несколько действий одного участника"
+  let rows := lines.tail.takeWhile (!·.startsWith "#") |>.filterMap fun line => do
+    let [full, short, _] := cells line | none
+    return (← codeWord full, ← codeWord short)
+  require (!rows.isEmpty) "Не найдены примеры с общим подлежащим."
+  for (full, short) in rows do
+    let words := tokens full
+    let some connector := words.findSome? Logic.readConnector |
+      throw (IO.userError s!"Не найден союз в «{full}».")
+    let some chain := Coordination.parse connector words |
+      throw (IO.userError s!"Не разобран полный ряд «{full}».")
+    require (Coordination.renderFull connector chain == words &&
+      Coordination.parse connector (tokens short) == some chain &&
+      Coordination.compact connector chain == tokens short && words != tokens short)
+      s!"В «{short}» меняется разбор или порядок действий «{full}»."
+    checkSpeechGroup "Подчинительные союзы.md" (tokens short)
+  IO.println s!"Общим подлежащим объединено рядов — {rows.length}; слова {(rows.map (fun (full, _) => (tokens full).length)).sum} / {(rows.map (fun (_, short) => (tokens short).length)).sum}."
+
 private def checkDirectives (markdown : String) : IO Unit := do
   let rows := (markdown.splitOn "\n").filterMap fun line => do
     let [address, full, short] := cells line | none
@@ -892,6 +950,8 @@ def main (args : List String) : IO Unit := do
   let connectors ← IO.FS.readFile (vault / "Подчинительные союзы.md")
   checkConditionals connectors
   checkChoices connectors
+  checkCoordination connectors
+  checkCoordinationProfiles
   checkTimeAnswers connectors
   checkDirectives (← IO.FS.readFile (vault / "Модальность.md"))
   let garden ← dialogueTurns (← IO.FS.readFile (vault / "Разговор в саду.md"))

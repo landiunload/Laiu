@@ -1,4 +1,5 @@
 import Laiu.Particles
+import Laiu.PredicateContext
 
 namespace Laiu.PolarityAnswers
 
@@ -107,39 +108,18 @@ theorem compact_saves_words (context : Option Phrase) (clause : Phrase)
 /-- An overt subject makes the reply independent. A predicate by itself gets
     its subject, and its time if unmarked, from the question. -/
 def readReply (context : Option Phrase) (words : List String) : Option Phrase :=
-  Syntax.parse words <|> recover context words <|> do
-    let asked ← context
-    let clause ← Syntax.parse (asked.person.word :: words)
-    return if clause.time = .implicit then { clause with time := asked.time } else clause
+  Syntax.parse words <|> recover context words <|>
+    (context.bind (fun asked => PredicateContext.parseBare asked words))
 
 private theorem read_reply_full (context : Option Phrase) (clause : Phrase) :
     readReply context (render clause) = some clause := by
   simp [readReply, parse_render]
 
-private def predicateReply (asked clause : Phrase) : List String :=
-  let time := if clause.time = asked.time then .implicit else clause.time
-  (render { clause with time }).tail
-
-private def usableReply (context : Option Phrase) (clause : Phrase) (words : List String) : Prop :=
-  readReply context words = some clause ∧
-  (Phonology.sharedVowelBoundaries words).length ≤ (Phonology.sharedVowelBoundaries (render clause)).length ∧
-  (Phonology.sharedConsonantBoundaries words).length ≤
-    (Phonology.sharedConsonantBoundaries (render clause)).length
-
-private instance (context : Option Phrase) (clause : Phrase) (words : List String) :
-    Decidable (usableReply context clause words) := by
-  unfold usableReply
-  infer_instance
-
 def compactReply (context : Option Phrase) (clause : Phrase) : List String :=
   if compact context clause ≠ render clause then compact context clause else
     match context with
     | none => render clause
-    | some asked =>
-      let body := predicateReply asked clause
-      if usableReply context clause body then body
-      else if usableReply context clause (render clause).tail then (render clause).tail
-      else render clause
+    | some asked => PredicateContext.choose (readReply context) [] asked clause
 
 theorem read_compactReply (context : Option Phrase) (clause : Phrase) :
     readReply context (compactReply context clause) = some clause := by
@@ -159,13 +139,7 @@ theorem read_compactReply (context : Option Phrase) (clause : Phrase) :
   · rw [compactReply.eq_def, ite_eq_right shortened]
     cases context with
     | none => exact read_reply_full _ _
-    | some asked =>
-      dsimp only
-      split
-      · exact (show usableReply _ _ _ from ‹_›).1
-      · split
-        · exact (show usableReply _ _ _ from ‹_›).1
-        · exact read_reply_full _ _
+    | some asked => exact PredicateContext.read_choose _ _ _ _ (read_reply_full _ _)
 
 theorem compactReply_no_longer (context : Option Phrase) (clause : Phrase) :
     (compactReply context clause).length ≤ (render clause).length := by
@@ -175,18 +149,7 @@ theorem compactReply_no_longer (context : Option Phrase) (clause : Phrase) :
   · rw [compactReply.eq_def, ite_eq_right shortened]
     cases context with
     | none => exact Nat.le_refl _
-    | some asked =>
-      dsimp only
-      split
-      · simp only [predicateReply, List.length_tail]
-        split
-        · rw [Syntax.render_length clause]
-          omega
-        · exact Nat.sub_le _ _
-      · split
-        · rw [List.length_tail]
-          exact Nat.sub_le _ _
-        · exact Nat.le_refl _
+    | some asked => exact PredicateContext.choose_no_longer _ _ _ _
 
 example : recover (readContext ["а", "ли", "ки", "лам"]) ["ли"] =
     some ⟨.speaker, false, .neutral, .go, .implicit, false, none⟩ := by decide

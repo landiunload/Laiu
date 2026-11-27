@@ -5,7 +5,7 @@ namespace Laiu.TemporalAdverbs
 open Particles
 
 inductive Adverb where
-  | now | soon | recently | atNight | byDay
+  | now | soon | recently | atNight | byDay | briefly
   deriving DecidableEq, Repr
 
 def Adverb.word : Adverb → String
@@ -14,12 +14,13 @@ def Adverb.word : Adverb → String
   | .recently => "лоо"
   | .atNight => "нуу"
   | .byDay => "аруу"
+  | .briefly => "луви"
 
 def Adverb.tense : Adverb → Option Logic.Tense
   | .now => some .present
   | .soon => some .future
   | .recently => some .past
-  | .atNight | .byDay => none
+  | .atNight | .byDay | .briefly => none
 
 private def readAdverb : String → Option Adverb
   | "ииу" => some .now
@@ -27,6 +28,7 @@ private def readAdverb : String → Option Adverb
   | "лоо" => some .recently
   | "нуу" => some .atNight
   | "аруу" => some .byDay
+  | "луви" => some .briefly
   | _ => none
 
 private theorem read_adverb_word (adverb : Adverb) : readAdverb adverb.word = some adverb := by
@@ -177,6 +179,24 @@ theorem positions_use_same_word_count (utterance : TimedUtterance) :
     (render utterance .initial).length = (render utterance .final).length := by
   simp [render, renderUtterance] <;> omega
 
+theorem brief_duration_preserves_tense (body : Utterance) (fallback : Logic.Tense) :
+    (TimedUtterance.mk body .briefly).resolvedTime fallback =
+      some (body.clause.time.written.getD fallback) := by
+  exact Logic.resolved_without_fixed_adverb fallback body.clause.time.written
+
+theorem brief_duration_costs_one_word (body : Utterance) (position : Position) :
+    (render ⟨body, .briefly⟩ position).length = (renderUtterance body).length + 1 := by
+  cases position <;> simp [render, renderUtterance] <;> omega
+
+theorem brief_duration_differs_from_frequency_in_context (left right : String) :
+    Phonology.withoutVowelLength (left ++ Adverb.briefly.word ++ right) ≠
+      Phonology.withoutVowelLength (left ++ "вилу" ++ right) :=
+  Phonology.distinct_consonants_survive_in_context _ _ _ _ (by decide)
+
+theorem brief_duration_has_two_open_syllables :
+    Phonology.syllableCount Adverb.briefly.word = 2 ∧
+      Phonology.closedSyllableCount Adverb.briefly.word = 0 := by decide
+
 theorem removing_written_particle_saves_one (utterance : TimedUtterance) (position : Position)
     (written : utterance.body.clause.time ≠ .implicit) :
     (render utterance.withoutTimeParticle position).length + 1 = (render utterance position).length := by
@@ -193,6 +213,9 @@ example : (parse ["луу", "и", "ки"]).bind (·.resolvedTime .present) = som
 example : (parse ["и", "ки", "ло", "луу"]).bind (·.resolvedTime .present) = none := by decide
 example : (parse ["и", "ки", "нуу"]).bind (·.resolvedTime .past) = some .past := by decide
 example : (parse ["и", "ки", "луу"]).bind (·.resolvedTime .past) = some .future := by decide
+example : parse ["а", "ки", "эм", "луви"] = none := by decide
+example : parse ["луви", "а", "ки", "луви", "эм"] = none := by decide
+example : (parse ["и", "ки", "ло", "ка", "луви"]).map (·.body.clause.result) = some true := by decide
 
 example : Phonology.withoutVowelLength "акилууэм" = Phonology.withoutVowelLength "акилуэм" := by decide
 example : Phonology.withoutVowelLength "акилооэм" = Phonology.withoutVowelLength "акилоэм" := by decide

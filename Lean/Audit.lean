@@ -281,6 +281,25 @@ private def checkTemporalAdverbs (markdown : String) : IO Unit := do
     require (preferred == actual) s!"Для «{last}» при учёте стыков наречие ставится {actual}."
   IO.println s!"Пары с наречиями времени ({rows.length}) сверены с разбором и стыками гласных."
 
+private def checkBriefDuration (markdown : String) : IO Unit := do
+  let sectionLines := (markdown.splitOn "\n").dropWhile (fun line =>
+    line.trimAscii.toString != "## Короткая длительность")
+  let rows := sectionLines.tail.takeWhile (!·.startsWith "#") |>.filterMap fun line => do
+    let [bare, full, _] := cells line | none
+    return (← codeWord bare, ← codeWord full)
+  require (!rows.isEmpty) "Не найдены примеры короткой длительности."
+  for (bare, full) in rows do
+    let bareWords := spokenTokens bare
+    let fullWords := spokenTokens full
+    let some body := Particles.parseUtterance bareWords |
+      throw (IO.userError s!"Не удалось разобрать основу «{bare}».")
+    let some timed := TemporalAdverbs.parse fullWords |
+      throw (IO.userError s!"Не удалось разобрать длительность в «{full}».")
+    require (timed.adverb == .briefly && timed.body == body && fullWords.length == bareWords.length + 1)
+      s!"В «{full}» должна добавляться только короткая длительность."
+    checkSpeechGroup "Наречия.md" fullWords
+  IO.println s!"Короткая длительность: проверены примеры ({rows.length}), время, результат и вопрос сохраняются."
+
 private def checkTimeCompaction (markdown : String) : IO Unit := do
   let sectionLines := (markdown.splitOn "\n").dropWhile (fun line =>
     line.trimAscii.toString != "### Когда частицу можно опустить")
@@ -612,18 +631,22 @@ private def checkDirectives (markdown : String) : IO Unit := do
       s!"«{short}» не сохраняет разбор «{full}» для адресата «{address}»."
   IO.println s!"Проверены примеры побуждений ({rows.length}). Адресат и действие сохраняются."
 
-private def checkGardenDialogue (markdown : String) : IO Unit := do
-  let turns := ((markdown.splitOn "\n").map cells).filter fun row =>
+private def dialogueTurns (markdown : String) : IO (List String) := do
+  let rows := ((markdown.splitOn "\n").map cells).filter fun row =>
     row.head? == some "А" || row.head? == some "Б"
+  rows.mapM fun row => do
+    let [_, written, _] := row | throw (IO.userError s!"Неверный формат реплики: {row}.")
+    let ["", text, ""] := written.splitOn "**" | throw (IO.userError s!"Не читается реплика: {written}.")
+    pure text
+
+private def checkGardenDialogue (turns : List String) : IO Unit := do
   require (!turns.isEmpty) "В разговоре в саду не найдены реплики."
   let known := Morphology.reservedForms
   let mut boundaries := []
   let mut consonantBoundaries := []
   let mut wordCount := 0
   let mut temporalQuestion := none
-  for row in turns do
-    let [_, written, _] := row | throw (IO.userError s!"Неверный формат реплики: {row}.")
-    let ["", text, ""] := written.splitOn "**" | throw (IO.userError s!"Не читается реплика: {written}.")
+  for text in turns do
     let groups := (speechGroups text).filter (!·.isEmpty)
     let phrase := groups.flatten
     wordCount := wordCount + phrase.length
@@ -650,7 +673,7 @@ private def checkGardenDialogue (markdown : String) : IO Unit := do
   IO.println s!"Стыков одинаковых гласных внутри реплик — {boundaries.length}{detail}."
   IO.println s!"Стыков одинаковых согласных внутри реплик — {consonantBoundaries.length} ({formatBoundaries consonantBoundaries})."
 
-private def checkBenchmarks (markdown : String) : IO Unit := do
+private def checkBenchmarks (markdown : String) : IO (List String) := do
   let table := (markdown.splitOn "\n").map cells
   let rows := table.filterMap fun row => do
     let [laiu, russian, letters, words] := row | none
@@ -679,6 +702,29 @@ private def checkBenchmarks (markdown : String) : IO Unit := do
   let closed := (laiuWords.map Phonology.closedSyllableCount).sum
   IO.println s!"Слоги Laiu: {syllables - closed} открытых и {closed} закрытых."
   IO.println s!"Стыки одинаковых гласных ({boundaries.length}): {formatBoundaries boundaries}."
+  return left
+
+private def checkLigatures (phrases : List String) : IO Unit := do
+  let mut counts : Std.HashMap (Char × Char) Nat := {}
+  let mut ordinary := 0
+  let mut compact := 0
+  for word in phrases.flatMap spokenTokens do
+    let some glyphs := Script.encode word |
+      throw (IO.userError s!"Слово «{word}» не представимо обычными знаками.")
+    let joined := Script.compactGlyphs glyphs
+    require (Script.decodeCompact joined == some word)
+      s!"Связки меняют чтение слова «{word}»."
+    for (first, second) in glyphs.zip glyphs.tail do
+      if first.count == .single && second.count == .single && first.sound != second.sound then
+        let pair := (first.sound, second.sound)
+        counts := counts.insert pair (counts.getD pair 0 + 1)
+    ordinary := ordinary + glyphs.length
+    compact := compact + joined.length
+  let best := (counts.toList.mergeSort fun first second => first.2 ≥ second.2).take 3
+  require (ordinary - compact == (best.map Prod.snd).sum)
+    "Три действующие связки не достигают верхней границы для этого корпуса."
+  let ranked := best.map fun ((first, second), count) => s!"{String.ofList [first, second]} ({count})"
+  IO.println s!"Связки: {phrases.length} фраз, {ordinary} / {compact} знаков. {String.intercalate ", " ranked}."
 
 private def lengthCollisions (forms : List String) (normalize : String → String) : List (List String) :=
   let profiles := forms.map normalize
@@ -701,6 +747,20 @@ private def showLengthContrasts : IO Unit := do
   for group in consonantOnly ++ jointly do
     IO.println (String.intercalate " / " group)
 
+private def showSoundMergers : IO Unit := do
+  let forms := Morphology.reservedForms.eraseDups
+  let sounds := Lexicon.vowels ++ Phonology.consonants
+  let pairs := sounds.zipIdx |>.flatMap fun (first, index) =>
+    (sounds.drop (index + 1)).map (first, ·)
+  let collisionFree := pairs.filter fun (first, second) => Id.run do
+    let mut seen : Std.HashSet String := {}
+    for word in forms do
+      let normalized := word.map fun sound => if sound == second then first else sound
+      if seen.contains normalized then return false
+      seen := seen.insert normalized
+    return true
+  IO.println s!"Слияние звуков без переписывания слов: {pairs.length} пар, {pairs.length - collisionFree.length} дают совпадения."
+
 def main (args : List String) : IO Unit := do
   let vault : System.FilePath ← match args with
     | [] => pure ".."
@@ -722,9 +782,11 @@ def main (args : List String) : IO Unit := do
   checkSpatialAnswers questions
   checkPolarityAnswers questions
   checkShortQuestions questions
-  checkTransferAnswers (← IO.FS.readFile (vault / "Обладание и передача.md"))
+  let transfer ← IO.FS.readFile (vault / "Обладание и передача.md")
+  checkTransferAnswers transfer
   let adverbs ← IO.FS.readFile (vault / "Наречия.md")
   checkTemporalAdverbs adverbs
+  checkBriefDuration adverbs
   checkTimeCompaction adverbs
   checkTimeClarification adverbs
   checkTimeClarificationProfiles
@@ -733,7 +795,10 @@ def main (args : List String) : IO Unit := do
   checkChoices connectors
   checkTimeAnswers connectors
   checkDirectives (← IO.FS.readFile (vault / "Модальность.md"))
-  checkGardenDialogue (← IO.FS.readFile (vault / "Разговор в саду.md"))
-  checkBenchmarks (← IO.FS.readFile (vault / "Формальный анализ.md"))
+  let garden ← dialogueTurns (← IO.FS.readFile (vault / "Разговор в саду.md"))
+  checkGardenDialogue garden
+  let benchmark ← checkBenchmarks (← IO.FS.readFile (vault / "Формальный анализ.md"))
+  checkLigatures (benchmark ++ garden ++ (← dialogueTurns transfer))
   checkSoundResemblances vault
   showLengthContrasts
+  showSoundMergers

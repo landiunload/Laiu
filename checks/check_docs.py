@@ -28,9 +28,10 @@ def github_slug(heading):
 def missing_target(source, target, *, wiki=False):
     path, _, fragment = target.partition("#")
     if not wiki:
-        if urlsplit(path).scheme or path.startswith("//"):
+        url = urlsplit(path)
+        if url.scheme or url.netloc:
             return False
-        path, fragment = unquote(path), unquote(fragment)
+        path, fragment = unquote(url.path), unquote(fragment)
     location = ((ROOT if wiki else source.parent) / path) if path else source
     if wiki and not location.suffix:
         location = location.with_suffix(".md")
@@ -76,11 +77,11 @@ def check_canvas():
     return len(nodes), errors
 
 
-def read_trial_script(path):
+def read_trial_script(path, target="laiuListening"):
     script = path.read_text(encoding="utf-8").strip()
-    prefix = "window.laiuListening = "
+    prefix = f"window.{target} = "
     if not script.startswith(prefix) or not script.endswith(";"):
-        raise ValueError("Немашиночитаемый набор записей practices.js")
+        raise ValueError(f"Немашиночитаемый набор записей {path.name}")
     return json.loads(script[len(prefix):-1])
 
 
@@ -105,14 +106,12 @@ def listening_fingerprint(audio, phrases):
     return fingerprint.hexdigest()
 
 
-def load_listening_material():
+def general_listening_rows():
     notes = (ROOT / "Фонология.md").read_text(encoding="utf-8")
     rows = re.findall(
         r"^\| `([^`\n]+)` \| `([^`\n]+)` \| (сохраняется|теряется) \|$",
         notes, re.MULTILINE,
     )
-    pairs = [{"id": f"{index:02}", "phrases": [first, second]}
-             for index, (first, second, _) in enumerate(rows, 1)]
     _, _, rating_section = notes.partition("\n### Оценка звучания\n")
     rating_rows = re.findall(
         r"^\| ([a-z]+) \| ([^|\n]+) \| `([^`\n]+)` \| `([^`\n]+)` \|$",
@@ -120,11 +119,34 @@ def load_listening_material():
     )
     preference = [{"id": code, "title": title, "phrases": [first, second]}
                   for code, title, first, second in rating_rows]
+    return rows, preference
+
+
+def timing_listening_rows():
+    notes = (ROOT / "Наречия.md").read_text(encoding="utf-8")
+    _, _, section = notes.partition("\n### Если долготу трудно расслышать\n")
+    triples = re.findall(r"^\| `([^`\n]+)` \| `([^`\n]+)` \| `([^`\n]+)` \|$",
+                         section.split("\n#", 1)[0], re.MULTILINE)
+    labels = (("soon", "Скоро"), ("recent", "Недавно"))
+    if len(triples) != len(labels):
+        raise ValueError("Нужны две тройки для пробы времени")
+    rows = [pair for bare, short, clear in triples
+            for pair in ((bare, short, "теряется"), (bare, clear, "сохраняется"))]
+    preference = [{"id": code, "title": title, "phrases": [short, clear]}
+                  for (code, title), (_, short, clear) in zip(labels, triples, strict=True)]
+    return rows, preference
+
+
+def load_listening_material(*, timing=False):
+    rows, preference = timing_listening_rows() if timing else general_listening_rows()
+    pairs = [{"id": f"{index:02}", "phrases": [first, second]}
+             for index, (first, second, _) in enumerate(rows, 1)]
     if not preference or len({item["id"] for item in preference}) != len(preference):
         raise ValueError("У пар оценки должны быть разные коды")
-    trial = read_trial_script(ROOT / "Звучание" / "practices.js")
-    if trial["source"] != "synthetic":
-        raise ValueError("Публичная проба должна использовать синтетический набор")
+    filename, target = ("timing.js", "laiuTiming") if timing else ("practices.js", "laiuListening")
+    trial = read_trial_script(ROOT / "Звучание" / filename, target)
+    if trial["source"] != "synthetic" or trial.get("study") != ("time" if timing else None):
+        raise ValueError("Публичная проба должна использовать свой синтетический набор")
     if not pairs or trial["pairs"] != pairs or trial["preference"] != preference:
         raise ValueError("Фразы пробы расходятся с фонологией")
     phrases = list(dict.fromkeys(phrase for row in pairs + preference for phrase in row["phrases"]))
@@ -141,4 +163,5 @@ if __name__ == "__main__":
         raise SystemExit("\n".join(errors))
     print(f"Справочник: {link_count} ссылок и {node_count} узлов карты проверены.")
     trial, _ = load_listening_material()
-    print(f"Проба на слух: {len(trial['audio'])} WAV-записей совпадают со списком фраз.")
+    timing_trial, _ = load_listening_material(timing=True)
+    print(f"Проба на слух: {len(trial['audio'])} общих и {len(timing_trial['audio'])} коротких WAV-записей проверены.")

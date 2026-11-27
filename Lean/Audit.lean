@@ -237,9 +237,10 @@ private def checkTimeClarification (markdown : String) : IO Unit := do
   let rows := (sectionLines.tail.takeWhile (!·.startsWith "#")).filterMap fun line => do
     let [bare, compact, clear] := cells line | none
     return (← codeWord bare, ← codeWord compact, ← codeWord clear)
-  require (!rows.isEmpty) "Не найдены примеры уточнения времени."
+  let topics : List TemporalAdverbs.Adverb := [.soon, .recently]
+  require (rows.length == topics.length) "Нужны тройки со «скоро» и «недавно»."
   let sound := fun words => Phonology.withoutVowelLength (String.join words)
-  for (bare, compact, clear) in rows do
+  for ((bare, compact, clear), topic) in rows.zip topics do
     let bareWords := spokenTokens bare
     let shortWords := spokenTokens compact
     let clearWords := spokenTokens clear
@@ -250,7 +251,7 @@ private def checkTimeClarification (markdown : String) : IO Unit := do
     let some short := TemporalAdverbs.compact marked .present |
       throw (IO.userError s!"Частица и наречие расходятся в «{clear}».")
     let initial := TemporalAdverbs.render short .initial
-    require (marked.adverb.prefersFrontWhenTied && marked.body == explicit &&
+    require (marked.adverb == topic && marked.body == explicit &&
       TemporalAdverbs.render marked .final == clearWords &&
       TemporalAdverbs.render short .final == shortWords && shortWords.length + 1 == clearWords.length)
       s!"«{clear}» должно добавлять только совпадающую частицу к «{compact}»."

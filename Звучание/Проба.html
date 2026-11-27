@@ -20,6 +20,7 @@
     button:hover:enabled { box-shadow: inset 0 0 0 2px #8b6d82; }
     button:disabled, select:disabled { opacity: .55; cursor: default; }
     :focus-visible { outline: 3px solid #8b4e77; outline-offset: 3px; }
+    a { color: #583c50; text-underline-offset: .17em; }
     .actions, .answer-options, .ratings { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
     .answer-options > button { flex: 1 1 160px; text-align: left; }
     .ratings fieldset { flex: 1 1 175px; min-width: 0; border: 1px solid #dcc8c0; border-radius: 14px; margin: 0; padding: 12px; }
@@ -35,23 +36,25 @@
     [hidden] { display: none !important; }
   </style>
   <script src="practices.js" defer></script>
+  <script src="timing.js" defer></script>
   <script src="recording.js" defer></script>
 </head>
 <body>
   <main>
     <header>
       <h1>Проба на слух</h1>
-      <p>Звучание Laiu</p>
+      <p id="studyTitle">Звучание Laiu</p>
     </header>
     <section id="intro">
       <p id="about">Подготавливаются записи.</p>
-      <p>Сначала выберите услышанные фразы. Затем прослушайте несколько пар и оцените мягкость и приятность каждой записи.</p>
+      <p id="instructions">Сначала выберите услышанные фразы. Затем прослушайте несколько пар и оцените мягкость и приятность каждой записи.</p>
       <div class="actions">
         <button type="button" class="primary" id="start" disabled>Начать пробу</button>
         <button type="button" id="recordVoice" disabled>Записать голос</button>
         <button type="button" id="openBundle" disabled>Открыть набор записей</button>
         <input type="file" id="bundleFile" accept=".json,application/json" hidden>
       </div>
+      <a id="studyLink" href="?study=time" hidden>Короткая проба «Скоро и недавно»</a>
     </section>
     <section id="recording" hidden aria-labelledby="recordingTitle">
       <h2 id="recordingTitle" tabindex="-1">Запись голоса</h2>
@@ -126,6 +129,7 @@
     const ratingGroups = [[$('softnessA'), $('ratingA')], [$('softnessB'), $('ratingB')]];
     const ratings = ratingGroups.flat();
     const stage = ['intro', 'recording', 'recognition', 'preference', 'results'];
+    const timing = new URLSearchParams(location.search).get('study') === 'time';
     let trials, answers, ratingPairs, ratingIndex, preference, order, result, heard, received, attempt;
 
     function shuffle(items) {
@@ -268,6 +272,7 @@
 
     function showResults() {
       result = { version: 4, attempt, source: data.source, audioSet: data.audioSet, answers, preference };
+      if (data.study) result.study = data.study;
       const correct = answers.filter(({ played, answer }) => played === answer).length;
       $('score').textContent = `Распознано ${correct} из ${answers.length}`;
       $('rated').replaceChildren(...data.preference.map(({ id, title }) => {
@@ -301,7 +306,8 @@
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
 
-    $('save').onclick = () => downloadJson(result, 'laiu-listening-results.json');
+    $('save').onclick = () => downloadJson(result,
+      timing ? 'laiu-listening-results-time.json' : 'laiu-listening-results.json');
 
     $('restart').onclick = start;
     $('start').onclick = start;
@@ -314,9 +320,9 @@
     }
 
     document.addEventListener('DOMContentLoaded', () => {
-      data = window.laiuListening;
+      data = timing ? window.laiuTiming : window.laiuListening;
       if (!data) {
-        $('about').textContent = 'Откройте страницу из папки «Звучание» скачанного репозитория, где лежит practices.js.';
+        $('about').textContent = 'Откройте страницу из папки «Звучание» скачанного репозитория.';
         return;
       }
       if (!Array.isArray(data.preference) || !data.preference.length ||
@@ -326,8 +332,16 @@
       }
       setListeningAudio(data);
       $('start').disabled = false;
+      if (timing) {
+        $('studyTitle').textContent = 'Скоро и недавно · Laiu';
+        $('instructions').textContent = 'Выберите услышанную фразу в восьми заданиях. Затем оцените мягкость и приятность двух пар.';
+        $('studyLink').textContent = 'Открыть общую пробу';
+        $('studyLink').href = 'Проба.html';
+      }
+      $('studyLink').hidden = !(window.laiuListening && window.laiuTiming);
       if (window.enableLaiuRecording) {
-        window.enableLaiuRecording(Object.keys(data.audio), { show, showMessage, downloadJson, setListeningAudio });
+        const bundleName = timing ? 'laiu-voice-time' : 'laiu-voice';
+        window.enableLaiuRecording(Object.keys(data.audio), { show, showMessage, downloadJson, setListeningAudio, bundleName });
       }
     });
   </script>

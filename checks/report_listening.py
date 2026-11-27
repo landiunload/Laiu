@@ -15,9 +15,9 @@ from check_docs import listening_fingerprint, load_listening_material, read_tria
 def check_voice(path, trial):
     phrases = list(trial["audio"])
     if path.suffix == ".js":
-        bundle = read_trial_script(path)
+        bundle = read_trial_script(path, "laiuTiming" if trial.get("study") == "time" else "laiuListening")
         if (bundle["source"] != "human" or bundle["pairs"] != trial["pairs"]
-                or bundle["preference"] != trial["preference"]):
+                or bundle["preference"] != trial["preference"] or bundle.get("study") != trial.get("study")):
             raise ValueError("нужен набор WAV из той же пробы")
     else:
         bundle = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -50,6 +50,8 @@ def check_result(result, trial):
     version, source, digest = (result[key] for key in ("version", "source", "audioSet"))
     if type(version) is not int or version not in (3, 4):
         raise ValueError("неподдерживаемый формат ответов")
+    if result.get("study") != trial.get("study"):
+        raise ValueError("ответы относятся к другой пробе. Проверьте выбор --time")
     if source not in ("human", "synthetic") or not re.fullmatch("[0-9a-f]{64}", digest):
         raise ValueError("неизвестный источник записи или неверный идентификатор набора")
     if (source == "synthetic") != (digest == trial["audioSet"]):
@@ -126,7 +128,7 @@ def middle_score(scores):
 
 
 def render_report(trial, predictions, groups, voices, copies):
-    yield "# Звучание Laiu · результаты"
+    yield "# Скоро и недавно · результаты" if trial.get("study") == "time" else "# Звучание Laiu · результаты"
     yield ""
     yield "В отчёте посчитаны прохождения. Один слушатель может пройти пробу несколько раз."
     if copies:
@@ -160,11 +162,12 @@ def render_report(trial, predictions, groups, voices, copies):
 def main():
     parser = argparse.ArgumentParser(description="Сводка ответов из пробы Laiu")
     parser.add_argument("results", type=Path, nargs="+", help="экспорты ответов JSON")
+    parser.add_argument("--time", action="store_true", help="обработать короткую пробу «Скоро и недавно»")
     parser.add_argument("--voice", type=Path, action="append", default=[], help="готовый набор голоса JSON или practices.js из WAV")
     parser.add_argument("-o", "--output", type=Path, help="куда сохранить заметку Markdown")
     options = parser.parse_args()
     try:
-        trial, predictions = load_listening_material()
+        trial, predictions = load_listening_material(timing=options.time)
         voices = {check_voice(path, trial) for path in options.voice}
         groups, copies = collect_results(options.results, trial)
         if voices - {digest for _, digest in groups}:

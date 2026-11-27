@@ -14,17 +14,34 @@ class ListeningReportTests(TestCase):
     def setUpClass(cls):
         cls.trial, cls.predictions = load_listening_material()
 
-    def make_result(self):
+    def make_result(self, trial=None):
+        trial = self.trial if trial is None else trial
         answers = [
             dict(pair=row["id"], played=phrase, answer=phrase, plays=1)
-            for row in self.trial["pairs"] for phrase in row["phrases"]
+            for row in trial["pairs"] for phrase in row["phrases"]
         ]
         ratings = [
             dict(pair=row["id"], phrase=phrase, softness=5 - side, rating=3 + side)
-            for row in self.trial["preference"] for side, phrase in enumerate(row["phrases"])
+            for row in trial["preference"] for side, phrase in enumerate(row["phrases"])
         ]
-        return dict(version=4, attempt="1" * 32, source="synthetic", audioSet=self.trial["audioSet"],
-                    answers=answers, preference=ratings)
+        result = dict(version=4, attempt="1" * 32, source="synthetic", audioSet=trial["audioSet"],
+                      answers=answers, preference=ratings)
+        if "study" in trial:
+            result["study"] = trial["study"]
+        return result
+
+    def test_short_trial_reuses_clips_and_keeps_results_separate(self):
+        trial, predictions = load_listening_material(timing=True)
+        self.assertEqual(list(predictions.values()), ["теряется", "сохраняется"] * 2)
+        self.assertEqual(len(trial["audio"]), 6)
+        result = self.make_result(trial)
+        answers, ratings = check_result(result, trial)
+        self.assertEqual(len(answers), 8)
+        self.assertEqual(len(ratings), 4)
+        with self.assertRaisesRegex(ValueError, "другой пробе"):
+            check_result(result, self.trial)
+        with self.assertRaisesRegex(ValueError, "другой пробе"):
+            check_result(self.make_result(), trial)
 
     def test_report_counts_errors_by_direction_and_votes_by_metric(self):
         result = self.make_result()

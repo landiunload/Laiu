@@ -64,7 +64,7 @@
     return Array.from(hash, byte => byte.toString(16).padStart(2, '0')).join('');
   }
 
-  window.enableLaiuRecording = (phrases, { show, showMessage, downloadJson, setListeningAudio }) => {
+  window.enableLaiuRecording = (phrases, { show, showMessage, downloadJson, setListeningAudio, bundleName }) => {
     const element = id => document.getElementById(id);
     const capture = element('capture');
     const accept = element('acceptTake');
@@ -201,8 +201,8 @@
       try {
         const snapshot = { ...audio };
         const audioSet = await fingerprint(phrases, snapshot);
-        const name = Object.keys(snapshot).length === phrases.length
-          ? 'laiu-voice.json' : 'laiu-voice-draft.json';
+        const draft = Object.keys(snapshot).length === phrases.length ? '' : '-draft';
+        const name = `${bundleName}${draft}.json`;
         downloadJson({ version: 1, phrases, audioSet, audio: snapshot }, name);
       } catch {
         showMessage('Не удалось сохранить файл с записями. Попробуйте ещё раз.');
@@ -240,7 +240,7 @@
         const bundle = JSON.parse(await selected.text());
         if (bundle.version !== 1 || !Array.isArray(bundle.phrases) ||
             bundle.phrases.length !== phrases.length || !phrases.every((item, index) => item === bundle.phrases[index])) {
-          showMessage('Для этого файла нужен набор фраз из того же выпуска Laiu.');
+          showMessage('Выберите набор для этой пробы из того же выпуска Laiu.');
           return;
         }
         const keys = Object.keys(bundle.audio);
@@ -252,7 +252,8 @@
       } catch {
         showMessage('Не удалось открыть файл с записями. Выберите сохранённый набор или черновик.');
       } finally {
-        [start, open, recordVoice].forEach(button => { button.disabled = false; });
+        [start, open].forEach(button => { button.disabled = false; });
+        recordVoice.disabled = !canRecord;
         if (!element('intro').hidden && element('message').hidden) start.focus();
       }
     };

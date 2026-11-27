@@ -1,6 +1,7 @@
 // Rebuild with @echogarden/espeak-ng-emscripten 0.3.5.
 // Pass the absolute path to espeak-ng.js if installed outside the repository.
 import { createHash } from "node:crypto";
+import { constants } from "node:fs";
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -10,8 +11,11 @@ const notes = (await readFile(new URL("../Фонология.md", import.meta.ur
 const clips = [...notes.matchAll(/!\[\[Звучание\/([^\]\n]+\.wav)\]\]\n((?:> \*\*`[^`\n]+`\*\*[^\n]*\n)+)/gu)];
 if (clips.length === 0) throw new Error("В фонологии нет размеченных аудиопримеров");
 const transcriptLines = (transcript) => [...transcript.matchAll(/\*\*`([^`]+)`\*\*/gu)].map((match) => match[1]);
-const pairs = [...notes.matchAll(/^\| `([^`\n]+)` \| `([^`\n]+)` \| (?:сохраняется|теряется) \|$/gmu)]
-  .map(([, a, b], index) => ({ id: String(index + 1).padStart(2, "0"), phrases: [a, b] }));
+const numbered = (rows) => rows.map((phrases, index) => ({
+  id: String(index + 1).padStart(2, "0"), phrases,
+}));
+const pairs = numbered([...notes.matchAll(/^\| `([^`\n]+)` \| `([^`\n]+)` \| (?:сохраняется|теряется) \|$/gmu)]
+  .map(([, first, second]) => [first, second]));
 const ratingSection = notes.split("\n### Оценка звучания\n")[1]?.split("\n> [!note]", 1)[0] ?? "";
 const preference = [...ratingSection.matchAll(/^\| ([a-z]+) \| ([^|\n]+) \| `([^`\n]+)` \| `([^`\n]+)` \|$/gmu)]
   .map(([, id, title, first, second]) => ({ id, title, phrases: [first, second] }));
@@ -20,21 +24,37 @@ if (new Set(preference.map(({ id }) => id)).size !== preference.length ||
     preference.some(({ phrases }) => phrases[0] === phrases[1])) {
   throw new Error("У каждой пары для оценки должен быть свой код и две разные фразы");
 }
-const recordings = new Map();
-for (const { id, phrases } of pairs) {
-  phrases.forEach((phrase, side) => {
-    if (!recordings.has(phrase)) recordings.set(phrase, `pair-${id}-${"ab"[side]}.wav`);
-  });
-}
-for (const { id, phrases } of preference) {
-  phrases.forEach((phrase, side) => {
-    if (!recordings.has(phrase)) recordings.set(phrase, `${id}-${"ab"[side]}.wav`);
-  });
+const adverbs = (await readFile(new URL("../Наречия.md", import.meta.url), "utf8")).replaceAll("\r\n", "\n");
+const timingSection = adverbs.split("\n### Если долготу трудно расслышать\n")[1]?.split("\n#", 1)[0] ?? "";
+const timingRows = [...timingSection.matchAll(/^\| `([^`\n]+)` \| `([^`\n]+)` \| `([^`\n]+)` \|$/gmu)];
+const timingLabels = [["soon", "Скоро"], ["recent", "Недавно"]];
+if (timingRows.length !== timingLabels.length) throw new Error("Нужны две тройки для пробы времени");
+const timingPairs = numbered(timingRows.flatMap(([, bare, short, clear]) => [[bare, short], [bare, clear]]));
+const timingPreference = timingRows.map(([, , short, clear], index) => {
+  const [id, title] = timingLabels[index];
+  return { id, title, phrases: [short, clear] };
+});
+const general = { file: "practices.js", global: "laiuListening", pairs, preference };
+const timing = { file: "timing.js", global: "laiuTiming", study: "time", pairs: timingPairs, preference: timingPreference };
+
+function recordingFiles(trial) {
+  const recordings = new Map();
+  for (const { id, phrases } of [
+    ...trial.pairs.map(pair => ({ ...pair, id: `pair-${pair.id}` })),
+    ...trial.preference,
+  ]) {
+    phrases.forEach((phrase, side) => {
+      if (!recordings.has(phrase)) recordings.set(phrase, `${id}-${"ab"[side]}.wav`);
+    });
+  }
+  return recordings;
 }
 
-const [mode, folder] = process.argv.slice(2);
+const timingOnly = process.argv[2] === "--time";
+const [mode, folder] = process.argv.slice(timingOnly ? 3 : 2);
+const selected = timingOnly ? timing : general;
 if (mode === "--list") {
-  for (const [phrase, file] of recordings) console.log(`${file}\t${phrase}`);
+  for (const [phrase, file] of recordingFiles(selected)) console.log(`${file}\t${phrase}`);
   process.exit(0);
 }
 const isHuman = mode === "--recordings";
@@ -147,26 +167,39 @@ async function writeExamples(examples) {
   }
 }
 
-if (!isHuman) await mkdir(output, { recursive: true });
-const audio = {};
-const fingerprint = createHash("sha256");
-for (const [phrase, filename] of recordings) {
-  const wav = isHuman ? await readFile(new URL(filename, destination)) : wave(synthesize(phrase));
-  if (wav.length <= 44 || wav.toString("ascii", 0, 4) !== "RIFF" || wav.toString("ascii", 8, 12) !== "WAVE") {
-    throw new Error(`Нужна непустая WAV-запись: ${filename}`);
+async function writeTrial({ file, global, study, pairs, preference }) {
+  const recordings = recordingFiles({ pairs, preference });
+  const audio = {};
+  const fingerprint = createHash("sha256");
+  for (const [phrase, filename] of recordings) {
+    const wav = isHuman ? await readFile(new URL(filename, destination)) : wave(synthesize(phrase));
+    if (wav.length <= 44 || wav.toString("ascii", 0, 4) !== "RIFF" || wav.toString("ascii", 8, 12) !== "WAVE") {
+      throw new Error(`Нужна непустая WAV-запись: ${filename}`);
+    }
+    fingerprint.update(phrase).update(wav);
+    audio[phrase] = `data:audio/wav;base64,${wav.toString("base64")}`;
   }
-  fingerprint.update(phrase).update(wav);
-  audio[phrase] = `data:audio/wav;base64,${wav.toString("base64")}`;
+  const data = { source: isHuman ? "human" : "synthetic", audioSet: fingerprint.digest("hex"), pairs, preference, audio, study };
+  await writeFile(new URL(file, destination), `window.${global} = ${JSON.stringify(data)};\n`);
+  console.log(`${file}: пар — ${pairs.length}, записей — ${recordings.size}.`);
 }
-const data = { source: isHuman ? "human" : "synthetic", audioSet: fingerprint.digest("hex"), pairs, preference, audio };
-await writeFile(new URL("practices.js", destination), `window.laiuListening = ${JSON.stringify(data)};\n`);
+
+if (!isHuman) await mkdir(output, { recursive: true });
+await writeTrial(selected);
 if (isHuman) {
+  const other = timingOnly ? general : timing;
   await Promise.all(["Проба.html", "recording.js"].map(file =>
     copyFile(new URL(file, output), new URL(file, destination))));
+  try {
+    await copyFile(new URL(other.file, output), new URL(other.file, destination), constants.COPYFILE_EXCL);
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+  }
 }
-if (!isHuman) {
-  // Keep synthesis state separate so changes to either group leave the other group's recordings intact.
+if (!isHuman && !timingOnly) {
+  // Keep synthesis state separate so changes to one group leave other recordings intact.
   voice = await makeVoice();
   await writeExamples(clips);
+  voice = await makeVoice();
+  await writeTrial(timing);
 }
-console.log(`Проба на слух: ${pairs.length} пар, ${recordings.size} записей.`);

@@ -31,7 +31,7 @@ class ListeningReportTests(TestCase):
         return result
 
     def test_short_trial_reuses_clips_and_keeps_results_separate(self):
-        trial, predictions = load_listening_material(timing=True)
+        trial, predictions = load_listening_material(study="time")
         self.assertEqual(list(predictions.values()), ["теряется", "сохраняется"] * 2)
         self.assertEqual(len(trial["audio"]), 6)
         result = self.make_result(trial)
@@ -46,10 +46,12 @@ class ListeningReportTests(TestCase):
     def test_report_counts_errors_by_direction_and_votes_by_metric(self):
         result = self.make_result()
         result["answers"][0]["answer"] = result["answers"][1]["played"]
+        result["answers"][1]["plays"] = 2
         checked = check_result(result, self.trial)
         groups = {("synthetic", self.trial["audioSet"]): [checked]}
         report = "\n".join(render_report(self.trial, self.predictions, groups, set(), 0))
-        self.assertIn("| `и тиа ки` | `ии ки` | сохраняется | 1/1 | 0/1 |", report)
+        self.assertIn("| `и тиа ки` | `ии ки` | сохраняется | 1/1 | 0/1 | 0/2 | 1/2 |", report)
+        self.assertIn("| `а ки лам` | `а ки лим` | сохраняется | 0/1 | 0/1 | 2/2 | 0/2 |", report)
         self.assertIn("| 5 / 4 · 1 / 0 / 0 | 3 / 4 · 0 / 0 / 1 |", report)
 
     def test_rejects_incomplete_repeated_and_invalid_answers(self):
@@ -72,6 +74,20 @@ class ListeningReportTests(TestCase):
         result["preference"][0] = result["preference"][1]
         with self.assertRaisesRegex(ValueError, "повторный"):
             check_result(result, self.trial)
+
+    def test_love_trial_compares_tenses_and_rates_equal_meanings(self):
+        trial, predictions = load_listening_material(study="love")
+        self.assertEqual(list(predictions.values()), ["теряется", "сохраняется"])
+        self.assertEqual(len(trial["audio"]), 4)
+        self.assertEqual([pair["phrases"] for pair in trial["pairs"]],
+                         [["и мил о", "и мил ло о"], ["и мил ас о", "и мил ло ас о"]])
+        self.assertEqual([pair["phrases"] for pair in trial["preference"]],
+                         [["и мил о", "и мил ас о"], ["и мил ло о", "и мил ло ас о"]])
+        result = self.make_result(trial)
+        answers, ratings = check_result(result, trial)
+        self.assertEqual((len(answers), len(ratings)), (4, 4))
+        with self.assertRaisesRegex(ValueError, "другой пробе"):
+            check_result(result, load_listening_material(study="time")[0])
 
     def test_groups_legacy_and_current_exports_without_counting_copies(self):
         demo = self.make_result()

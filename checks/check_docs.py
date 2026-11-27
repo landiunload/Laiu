@@ -137,15 +137,36 @@ def timing_listening_rows():
     return rows, preference
 
 
-def load_listening_material(*, timing=False):
-    rows, preference = timing_listening_rows() if timing else general_listening_rows()
+def love_listening_rows():
+    notes = (ROOT / "Залоги.md").read_text(encoding="utf-8")
+    _, _, section = notes.partition("\n### Люблю или любил\n")
+    matches = re.findall(r"^\| `([^`\n]+)` \| `([^`\n]+)` \| `([^`\n]+)` \| `([^`\n]+)` \|$",
+                         section.split("\n#", 1)[0], re.MULTILINE)
+    if len(matches) != 1 or len(set(matches[0])) != 4:
+        raise ValueError("Нужны четыре разные реплики для пробы «Люблю и любил»")
+    present, past, marked_present, marked_past = matches[0]
+    return [(present, past, "теряется"), (marked_present, marked_past, "сохраняется")], [
+        {"id": "present", "title": "Люблю", "phrases": [present, marked_present]},
+        {"id": "past", "title": "Любил", "phrases": [past, marked_past]},
+    ]
+
+
+LISTENING_STUDIES = {
+    None: ("practices.js", "laiuListening", general_listening_rows),
+    "time": ("timing.js", "laiuTiming", timing_listening_rows),
+    "love": ("love.js", "laiuLove", love_listening_rows),
+}
+
+
+def load_listening_material(*, study=None):
+    filename, target, read_rows = LISTENING_STUDIES[study]
+    rows, preference = read_rows()
     pairs = [{"id": f"{index:02}", "phrases": [first, second]}
              for index, (first, second, _) in enumerate(rows, 1)]
     if not preference or len({item["id"] for item in preference}) != len(preference):
         raise ValueError("У пар оценки должны быть разные коды")
-    filename, target = ("timing.js", "laiuTiming") if timing else ("practices.js", "laiuListening")
     trial = read_trial_script(ROOT / "Звучание" / filename, target)
-    if trial["source"] != "synthetic" or trial.get("study") != ("time" if timing else None):
+    if trial["source"] != "synthetic" or trial.get("study") != study:
         raise ValueError("Публичная проба должна использовать свой синтетический набор")
     if not pairs or trial["pairs"] != pairs or trial["preference"] != preference:
         raise ValueError("Фразы пробы расходятся с фонологией")
@@ -162,6 +183,6 @@ if __name__ == "__main__":
     if errors := note_errors + canvas_errors:
         raise SystemExit("\n".join(errors))
     print(f"Справочник: {link_count} ссылок и {node_count} узлов карты проверены.")
-    trial, _ = load_listening_material()
-    timing_trial, _ = load_listening_material(timing=True)
-    print(f"Проба на слух: {len(trial['audio'])} общих и {len(timing_trial['audio'])} коротких WAV-записей проверены.")
+    for study, (filename, _, _) in LISTENING_STUDIES.items():
+        trial, _ = load_listening_material(study=study)
+        print(f"Проба на слух: {filename}, проверено записей — {len(trial['audio'])}.")

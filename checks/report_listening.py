@@ -9,13 +9,14 @@ import re
 from statistics import median_high, median_low
 import wave
 
-from check_docs import listening_fingerprint, load_listening_material, read_trial_script
+from check_docs import LISTENING_STUDIES, listening_fingerprint, load_listening_material, read_trial_script
 
 
 def check_voice(path, trial):
     phrases = list(trial["audio"])
     if path.suffix == ".js":
-        bundle = read_trial_script(path, "laiuTiming" if trial.get("study") == "time" else "laiuListening")
+        _, target, _ = LISTENING_STUDIES[trial.get("study")]
+        bundle = read_trial_script(path, target)
         if (bundle["source"] != "human" or bundle["pairs"] != trial["pairs"]
                 or bundle["preference"] != trial["preference"] or bundle.get("study") != trial.get("study")):
             raise ValueError("нужен набор WAV из той же пробы")
@@ -51,7 +52,7 @@ def check_result(result, trial):
     if type(version) is not int or version not in (3, 4):
         raise ValueError("неподдерживаемый формат ответов")
     if result.get("study") != trial.get("study"):
-        raise ValueError("ответы относятся к другой пробе. Проверьте выбор --time")
+        raise ValueError("ответы относятся к другой пробе. Проверьте выбор --time или --love")
     if source not in ("human", "synthetic") or not re.fullmatch("[0-9a-f]{64}", digest):
         raise ValueError("неизвестный источник записи или неверный идентификатор набора")
     if (source == "synthetic") != (digest == trial["audioSet"]):
@@ -101,9 +102,15 @@ def recognition_rows(trial, predictions, runs):
     for pair in trial["pairs"]:
         code = pair["id"]
         first, second = pair["phrases"]
-        first_errors = sum(answers[code, first]["answer"] == second for answers, _ in runs)
-        second_errors = sum(answers[code, second]["answer"] == first for answers, _ in runs)
-        yield f"| `{first}` | `{second}` | {predictions[code]} | {first_errors}/{len(runs)} | {second_errors}/{len(runs)} |"
+        left = [answers[code, first] for answers, _ in runs]
+        right = [answers[code, second] for answers, _ in runs]
+        first_errors = sum(answer["answer"] == second for answer in left)
+        second_errors = sum(answer["answer"] == first for answer in right)
+        entries = left + right
+        first_pass = sum(answer["plays"] == 1 and answer["answer"] == answer["played"] for answer in entries)
+        repeated = sum(answer["plays"] > 1 for answer in entries)
+        yield (f"| `{first}` | `{second}` | {predictions[code]} | {first_errors}/{len(runs)} | "
+               f"{second_errors}/{len(runs)} | {first_pass}/{len(entries)} | {repeated}/{len(entries)} |")
 
 
 def rating_rows(trial, runs):
@@ -128,7 +135,9 @@ def middle_score(scores):
 
 
 def render_report(trial, predictions, groups, voices, copies):
-    yield "# Скоро и недавно · результаты" if trial.get("study") == "time" else "# Звучание Laiu · результаты"
+    study = trial.get("study")
+    title = {"time": "Скоро и недавно", "love": "Люблю и любил"}.get(study, "Звучание Laiu")
+    yield f"# {title} · результаты"
     yield ""
     yield "В отчёте посчитаны прохождения. Один слушатель может пройти пробу несколько раз."
     if copies:
@@ -146,8 +155,11 @@ def render_report(trial, predictions, groups, voices, copies):
         yield ""
         yield "### Разборчивость"
         yield ""
-        yield "| А | Б | Различие в модели | А принято за Б | Б принято за А |"
-        yield "| --- | --- | --- | ---: | ---: |"
+        if study == "love":
+            yield "Модель предполагает слияние одинаковых гласных и согласных."
+            yield ""
+        yield "| А | Б | Различие в модели | А принято за Б | Б принято за А | Верно с первого раза | С повтором |"
+        yield "| --- | --- | --- | ---: | ---: | ---: | ---: |"
         yield from recognition_rows(trial, predictions, runs)
         yield ""
         yield "### Мягкость и приятность"
@@ -162,12 +174,14 @@ def render_report(trial, predictions, groups, voices, copies):
 def main():
     parser = argparse.ArgumentParser(description="Сводка ответов из пробы Laiu")
     parser.add_argument("results", type=Path, nargs="+", help="экспорты ответов JSON")
-    parser.add_argument("--time", action="store_true", help="обработать короткую пробу «Скоро и недавно»")
-    parser.add_argument("--voice", type=Path, action="append", default=[], help="готовый набор голоса JSON или practices.js из WAV")
+    study = parser.add_mutually_exclusive_group()
+    study.add_argument("--time", dest="study", action="store_const", const="time", help="проба «Скоро и недавно»")
+    study.add_argument("--love", dest="study", action="store_const", const="love", help="проба «Люблю и любил»")
+    parser.add_argument("--voice", type=Path, action="append", default=[], help="готовый набор голоса JSON или JS, собранный из WAV")
     parser.add_argument("-o", "--output", type=Path, help="куда сохранить заметку Markdown")
     options = parser.parse_args()
     try:
-        trial, predictions = load_listening_material(timing=options.time)
+        trial, predictions = load_listening_material(study=options.study)
         voices = {check_voice(path, trial) for path in options.voice}
         groups, copies = collect_results(options.results, trial)
         if voices - {digest for _, digest in groups}:

@@ -21,6 +21,7 @@
     button:disabled, select:disabled { opacity: .55; cursor: default; }
     :focus-visible { outline: 3px solid #8b4e77; outline-offset: 3px; }
     a { color: #583c50; text-underline-offset: .17em; }
+    nav { display: flex; flex-wrap: wrap; column-gap: 18px; row-gap: 8px; }
     .actions, .answer-options, .ratings { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
     .answer-options > button { flex: 1 1 160px; text-align: left; }
     .ratings fieldset { flex: 1 1 175px; min-width: 0; border: 1px solid #dcc8c0; border-radius: 14px; margin: 0; padding: 12px; }
@@ -37,6 +38,7 @@
   </style>
   <script src="practices.js" defer></script>
   <script src="timing.js" defer></script>
+  <script src="love.js" defer></script>
   <script src="recording.js" defer></script>
 </head>
 <body>
@@ -54,7 +56,10 @@
         <button type="button" id="openBundle" disabled>Открыть набор записей</button>
         <input type="file" id="bundleFile" accept=".json,application/json" hidden>
       </div>
-      <a id="studyLink" href="?study=time" hidden>Короткая проба «Скоро и недавно»</a>
+      <nav aria-label="Пробы на слух">
+        <a id="studyLink" href="?study=time" hidden>Короткая проба «Скоро и недавно»</a>
+        <a id="loveStudyLink" href="?study=love" hidden>Короткая проба «Люблю и любил»</a>
+      </nav>
     </section>
     <section id="recording" hidden aria-labelledby="recordingTitle">
       <h2 id="recordingTitle" tabindex="-1">Запись голоса</h2>
@@ -107,6 +112,7 @@
     </section>
     <section id="results" hidden aria-labelledby="score">
       <h2 id="score" tabindex="-1"></h2>
+      <p id="firstPass" class="muted"></p>
       <table>
         <thead><tr><th scope="col">Пара</th><th scope="col">Верно</th></tr></thead>
         <tbody id="scores"></tbody>
@@ -129,7 +135,13 @@
     const ratingGroups = [[$('softnessA'), $('ratingA')], [$('softnessB'), $('ratingB')]];
     const ratings = ratingGroups.flat();
     const stage = ['intro', 'recording', 'recognition', 'preference', 'results'];
-    const timing = new URLSearchParams(location.search).get('study') === 'time';
+    const studyId = new URLSearchParams(location.search).get('study');
+    const studies = new Map([
+      ['time', { key: 'laiuTiming', title: 'Скоро и недавно', count: 'восьми' }],
+      ['love', { key: 'laiuLove', title: 'Люблю и любил', count: 'четырёх' }],
+    ]);
+    const study = studies.get(studyId);
+    const suffix = study ? `-${studyId}` : '';
     let trials, answers, ratingPairs, ratingIndex, preference, order, result, heard, received, attempt;
 
     function shuffle(items) {
@@ -274,7 +286,9 @@
       result = { version: 4, attempt, source: data.source, audioSet: data.audioSet, answers, preference };
       if (data.study) result.study = data.study;
       const correct = answers.filter(({ played, answer }) => played === answer).length;
+      const firstPass = answers.filter(({ played, answer, plays }) => played === answer && plays === 1).length;
       $('score').textContent = `Распознано ${correct} из ${answers.length}`;
+      $('firstPass').textContent = `Верно с первого прослушивания — ${firstPass} из ${answers.length}.`;
       $('rated').replaceChildren(...data.preference.map(({ id, title }) => {
         const heading = document.createElement('h4');
         heading.textContent = title;
@@ -306,8 +320,7 @@
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
 
-    $('save').onclick = () => downloadJson(result,
-      timing ? 'laiu-listening-results-time.json' : 'laiu-listening-results.json');
+    $('save').onclick = () => downloadJson(result, `laiu-listening-results${suffix}.json`);
 
     $('restart').onclick = start;
     $('start').onclick = start;
@@ -320,27 +333,28 @@
     }
 
     document.addEventListener('DOMContentLoaded', () => {
-      data = timing ? window.laiuTiming : window.laiuListening;
+      data = study ? window[study.key] : window.laiuListening;
       if (!data) {
         $('about').textContent = 'Откройте страницу из папки «Звучание» скачанного репозитория.';
         return;
       }
       if (!Array.isArray(data.preference) || !data.preference.length ||
           data.preference.some(pair => pair?.phrases?.length !== 2)) {
-        $('about').textContent = 'Откройте страницу и practices.js из одного выпуска Laiu.';
+        $('about').textContent = 'Откройте страницу и файлы записей из одного выпуска Laiu.';
         return;
       }
       setListeningAudio(data);
       $('start').disabled = false;
-      if (timing) {
-        $('studyTitle').textContent = 'Скоро и недавно · Laiu';
-        $('instructions').textContent = 'Выберите услышанную фразу в восьми заданиях. Затем оцените мягкость и приятность двух пар.';
+      if (study) {
+        $('studyTitle').textContent = `${study.title} · Laiu`;
+        $('instructions').textContent = `Выберите услышанную фразу в ${study.count} заданиях. Затем оцените мягкость и приятность двух пар.`;
         $('studyLink').textContent = 'Открыть общую пробу';
         $('studyLink').href = 'Проба.html';
       }
-      $('studyLink').hidden = !(window.laiuListening && window.laiuTiming);
+      $('studyLink').hidden = !(study ? window.laiuListening : window.laiuTiming);
+      $('loveStudyLink').hidden = !window.laiuLove || studyId === 'love';
       if (window.enableLaiuRecording) {
-        const bundleName = timing ? 'laiu-voice-time' : 'laiu-voice';
+        const bundleName = `laiu-voice${suffix}`;
         window.enableLaiuRecording(Object.keys(data.audio), { show, showMessage, downloadJson, setListeningAudio, bundleName });
       }
     });

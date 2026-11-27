@@ -36,6 +36,22 @@ const timingPreference = timingRows.map(([, , short, clear], index) => {
 });
 const general = { file: "practices.js", global: "laiuListening", pairs, preference };
 const timing = { file: "timing.js", global: "laiuTiming", study: "time", pairs: timingPairs, preference: timingPreference };
+const voices = (await readFile(new URL("../Залоги.md", import.meta.url), "utf8")).replaceAll("\r\n", "\n");
+const loveSection = voices.split("\n### Люблю или любил\n")[1]?.split("\n#", 1)[0] ?? "";
+const loveRows = [...loveSection.matchAll(/^\| `([^`\n]+)` \| `([^`\n]+)` \| `([^`\n]+)` \| `([^`\n]+)` \|$/gmu)];
+if (loveRows.length !== 1 || new Set(loveRows[0].slice(1)).size !== 4) {
+  throw new Error("Нужны четыре разные реплики для пробы «Люблю и любил»");
+}
+const [, present, past, markedPresent, markedPast] = loveRows[0];
+const love = {
+  file: "love.js", global: "laiuLove", study: "love",
+  pairs: numbered([[present, past], [markedPresent, markedPast]]),
+  preference: [
+    { id: "present", title: "Люблю", phrases: [present, markedPresent] },
+    { id: "past", title: "Любил", phrases: [past, markedPast] },
+  ],
+};
+const shortStudies = new Map([["--time", timing], ["--love", love]]);
 
 function recordingFiles(trial) {
   const recordings = new Map();
@@ -50,9 +66,9 @@ function recordingFiles(trial) {
   return recordings;
 }
 
-const timingOnly = process.argv[2] === "--time";
-const [mode, folder] = process.argv.slice(timingOnly ? 3 : 2);
-const selected = timingOnly ? timing : general;
+const shortStudy = shortStudies.get(process.argv[2]);
+const [mode, folder] = process.argv.slice(shortStudy ? 3 : 2);
+const selected = shortStudy ?? general;
 if (mode === "--list") {
   for (const [phrase, file] of recordingFiles(selected)) console.log(`${file}\t${phrase}`);
   process.exit(0);
@@ -203,19 +219,23 @@ async function writeTrial({ file, global, study, pairs, preference }) {
 if (!isHuman) await mkdir(output, { recursive: true });
 await writeTrial(selected);
 if (isHuman) {
-  const other = timingOnly ? general : timing;
   await Promise.all(["Проба.html", "recording.js"].map(file =>
     copyFile(new URL(file, output), new URL(file, destination))));
-  try {
-    await copyFile(new URL(other.file, output), new URL(other.file, destination), constants.COPYFILE_EXCL);
-  } catch (error) {
-    if (error.code !== "EEXIST") throw error;
+  for (const other of [general, ...shortStudies.values()]) {
+    if (other === selected) continue;
+    try {
+      await copyFile(new URL(other.file, output), new URL(other.file, destination), constants.COPYFILE_EXCL);
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+    }
   }
 }
-if (!isHuman && !timingOnly) {
+if (!isHuman && !shortStudy) {
   // Keep synthesis state separate so changes to one group leave other recordings intact.
   voice = await makeVoice();
   await writeExamples(clips);
-  voice = await makeVoice();
-  await writeTrial(timing);
+  for (const trial of shortStudies.values()) {
+    voice = await makeVoice();
+    await writeTrial(trial);
+  }
 }

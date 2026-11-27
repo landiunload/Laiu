@@ -34,6 +34,12 @@ private def collapseRuns (collapse : Char → Bool) (previous : Option Char) : L
 def withoutVowelLength (word : String) : String :=
   String.ofList (collapseRuns isVowel none word.toList)
 
+def withoutConsonantLength (word : String) : String :=
+  String.ofList (collapseRuns consonants.contains none word.toList)
+
+def withoutSoundLength (word : String) : String :=
+  String.ofList (collapseRuns (fun _ => true) none word.toList)
+
 theorem duration_loss_preserves_onset (text : String) :
     (withoutVowelLength text).toList.head? = text.toList.head? := by
   cases sounds : text.toList <;> simp [withoutVowelLength, sounds, collapseRuns]
@@ -86,6 +92,17 @@ def hasSameVowelBoundary (left right : String) : Bool :=
 
 def sharedVowelBoundaries (words : List String) : List (String × String) :=
   (words.zip words.tail).filter fun (left, right) => hasSameVowelBoundary left right
+
+def sharedConsonantBoundaries (words : List String) : List (String × String) :=
+  (words.zip words.tail).filter fun (left, right) =>
+    match left.toList.getLast?, right.toList.head? with
+    | some first, some second => consonants.contains first && first == second
+    | _, _ => false
+
+example : sharedConsonantBoundaries ["ар", "ри", "лу", "боу"] = [("ар", "ри")] := by decide
+example : withoutConsonantLength "арри" = "ари" := by decide
+example : withoutSoundLength "аррилубоу" ≠ withoutSoundLength "аририлубоу" := by decide
+example : withoutConsonantLength "муурри" ≠ withoutConsonantLength "мури" := by decide
 
 /-- Selected unwanted resemblances, written using the sounds of Laiu. -/
 private def avoidedProfiles : List String :=

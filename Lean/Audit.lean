@@ -363,7 +363,7 @@ private def checkMovementProfiles : IO Unit := do
   let phrases := movementPhrases [.implicit, .past, .present, .future]
   let mut profiles : Std.HashMap String Syntax.Phrase := {}
   for clause in phrases do
-    let spoken := Phonology.withoutVowelLength (String.join (Syntax.render clause))
+    let spoken := Phonology.withoutSoundLength (String.join (Syntax.render clause))
     if let some earlier := profiles[spoken]? then
       let samePersonSound := Phonology.withoutVowelLength earlier.person.word ==
         Phonology.withoutVowelLength clause.person.word
@@ -375,7 +375,7 @@ private def checkMovementProfiles : IO Unit := do
       profiles := profiles.insert spoken clause
   for marker in Syntax.Phase.stops.words do
     checkDistinctWordSound marker
-  IO.println s!"Проверка слитной речи охватывает {phrases.length} фраз движения и {profiles.size} звуковых профилей."
+  IO.println s!"Слитное движение без долготы гласных и согласных: {phrases.length} фраз, {profiles.size} звуковых профилей."
 
 private def checkTimeClarificationProfiles : IO Unit := do
   let clauses := movementPhrases [.past, .future]
@@ -413,6 +413,47 @@ private def checkVoiceExamples (markdown : String) : IO Unit := do
       s!"В формах залога расходятся роли или действие для «{active}»."
   IO.println s!"Сверены примеры залога ({rows.length}): актив и две формы пассива."
 
+private def checkVoiceTense (markdown : String) : IO Unit := do
+  let sectionLines := (markdown.splitOn "\n").dropWhile (fun line =>
+    line.trimAscii.toString != "### Люблю или любил")
+  let rows := (sectionLines.tail.takeWhile (!·.startsWith "#")).filterMap fun line => do
+    let [present, past, markedPresent, markedPast] := cells line | none
+    return (← codeWord present, ← codeWord past, ← codeWord markedPresent, ← codeWord markedPast)
+  require (!rows.isEmpty) "Не найдены пары настоящего и прошлого при слиянии согласных."
+  for (present, past, markedPresent, markedPast) in rows do
+    let now := spokenTokens present
+    let before := spokenTokens past
+    let some current := Voice.parse now |
+      throw (IO.userError s!"Не разобрана реплика «{present}».")
+    let some earlier := Voice.parse before |
+      throw (IO.userError s!"Не разобрана реплика «{past}».")
+    let reading := current.reading
+    require (reading.predicate.time.resolved == .present &&
+      earlier.reading == { reading with predicate := { reading.predicate with time := .past } } &&
+      Voice.render current true == spokenTokens markedPresent &&
+      Voice.render earlier true == spokenTokens markedPast)
+      s!"В примере «{present} / {past}» должны меняться только время и наличие ас."
+    let vowelOnly := Phonology.withoutVowelLength ∘ String.join
+    let both := Phonology.withoutSoundLength ∘ String.join
+    require (vowelOnly now != vowelOnly before && both now == both before &&
+      both (spokenTokens markedPresent) != both (spokenTokens markedPast))
+      s!"Ас должно восстанавливать различие времени в «{present} / {past}»."
+  IO.println s!"Ас сохраняет различие времени. Проверено пар — {rows.length}."
+
+private structure VoiceProfiles where
+  readings : Std.HashMap String (Bool × (Bool × Voice.Reading)) := {}
+  ambiguous : Std.HashSet String := {}
+
+private def recordVoiceProfile (profiles : VoiceProfiles) (spoken : String)
+    (key : Bool × Voice.Reading) (clear : Bool) (words : List String) : IO VoiceProfiles := do
+  if let some (earlierClear, earlier) := profiles.readings[spoken]? then
+    if (key != earlier && (earlierClear || clear)) || (clear && profiles.ambiguous.contains spoken) then
+      throw (IO.userError s!"В слитной речи меняются залог, роли или действие в «{String.intercalate " " words}».")
+    if key != earlier then
+      return { profiles with ambiguous := profiles.ambiguous.insert spoken }
+    if !clear then return profiles
+  return { profiles with readings := profiles.readings.insert spoken (clear, key) }
+
 private def checkVoiceProfiles : IO Unit := do
   checkDistinctWordSound Voice.passiveMarker
   checkDistinctWordSound Voice.agentMarker
@@ -432,8 +473,8 @@ private def checkVoiceProfiles : IO Unit := do
       .passive patient none predicate :: (participants.flatMap fun agent =>
         let active : Voice.Clause := .active agent patient predicate
         [active, active.toPassive])
-  let mut profiles : Std.HashMap String (Bool × (Bool × Voice.Reading)) := {}
-  let mut ambiguous : Std.HashSet String := {}
+  let mut vowelProfiles : VoiceProfiles := {}
+  let mut soundProfiles : VoiceProfiles := {}
   let mut total := 0
   for clause in clauses do
     let voice := match clause with
@@ -449,19 +490,13 @@ private def checkVoiceProfiles : IO Unit := do
       let words := Voice.render clause marked
       unless Voice.parse words == some clause do
         throw (IO.userError s!"Разбор залога не восстанавливает «{String.intercalate " " words}».")
-      let spoken := Phonology.withoutVowelLength (String.join words)
+      let text := String.join words
       let clear := voice || marked
-      if let some (earlierClear, earlier) := profiles[spoken]? then
-        if (key != earlier && (earlierClear || clear)) || (clear && ambiguous.contains spoken) then
-          throw (IO.userError s!"В слитной речи меняются залог, роли или действие в «{String.intercalate " " words}».")
-        if key != earlier then
-          ambiguous := ambiguous.insert spoken
-        if clear then
-          profiles := profiles.insert spoken (true, key)
-      else
-        profiles := profiles.insert spoken (clear, key)
+      vowelProfiles ← recordVoiceProfile vowelProfiles (Phonology.withoutVowelLength text) key clear words
+      soundProfiles ← recordVoiceProfile soundProfiles (Phonology.withoutSoundLength text) key clear words
       total := total + 1
-  IO.println s!"Залог: {total} фраз и {profiles.size} звуковых профилей. Совпадения только в кратком активе ({ambiguous.size})."
+  IO.println s!"Залог: {total} фраз и {vowelProfiles.readings.size} звуковых профилей без долготы гласных. Совпадения только в кратком активе ({vowelProfiles.ambiguous.size})."
+  IO.println s!"Без долготы гласных и согласных: {soundProfiles.readings.size} профилей. Совпадения только в кратком активе ({soundProfiles.ambiguous.size})."
 
 private def checkDeixis (markdown : String) : IO Unit := do
   let grammarRows := (markdown.splitOn "\n").map cells
@@ -555,6 +590,7 @@ private def checkGardenDialogue (markdown : String) : IO Unit := do
   require (!turns.isEmpty) "В разговоре в саду не найдены реплики."
   let known := Morphology.reservedForms
   let mut boundaries := []
+  let mut consonantBoundaries := []
   let mut wordCount := 0
   let mut temporalQuestion := none
   for row in turns do
@@ -579,10 +615,12 @@ private def checkGardenDialogue (markdown : String) : IO Unit := do
           s!"В разговоре в саду не удалось прочитать вопрос «{String.intercalate " " group}»."
       | _ => pure ()
     boundaries := boundaries ++ groups.flatMap sharedVowelBoundaries
+    consonantBoundaries := consonantBoundaries ++ groups.flatMap Phonology.sharedConsonantBoundaries
   IO.println s!"Разговор в саду: {turns.length} живых реплик сверены со словарём и рамками."
   IO.println s!"Слов в диалоге: {wordCount}."
   let detail := if boundaries.isEmpty then "" else s!" ({formatBoundaries boundaries})"
   IO.println s!"Стыков одинаковых гласных внутри реплик — {boundaries.length}{detail}."
+  IO.println s!"Стыков одинаковых согласных внутри реплик — {consonantBoundaries.length} ({formatBoundaries consonantBoundaries})."
 
 private def checkBenchmarks (markdown : String) : IO Unit := do
   let table := (markdown.splitOn "\n").map cells
@@ -614,15 +652,25 @@ private def checkBenchmarks (markdown : String) : IO Unit := do
   IO.println s!"Слоги Laiu: {syllables - closed} открытых и {closed} закрытых."
   IO.println s!"Стыки одинаковых гласных ({boundaries.length}): {formatBoundaries boundaries}."
 
-private def showLengthContrasts : IO Unit := do
-  let forms := Lexicon.forms Lexicon.entries
-  let profiles := forms.map Phonology.withoutVowelLength
-  let groups := profiles.eraseDups.filterMap fun profile =>
+private def lengthCollisions (forms : List String) (normalize : String → String) : List (List String) :=
+  let profiles := forms.map normalize
+  profiles.eraseDups.filterMap fun profile =>
     let words := (forms.zip profiles).filterMap fun (word, signature) =>
       if signature == profile then some word else none
     if words.length > 1 then some words else none
+
+private def showLengthContrasts : IO Unit := do
+  let groups := lengthCollisions (Lexicon.forms Lexicon.entries) Phonology.withoutVowelLength
   IO.println s!"Словарные ряды, различимые только по долготе: {groups.length}."
   for group in groups do
+    IO.println (String.intercalate " / " group)
+  let forms := Morphology.reservedForms.eraseDups
+  let consonantOnly := lengthCollisions forms Phonology.withoutConsonantLength
+  let jointly := (lengthCollisions forms Phonology.withoutSoundLength).filter fun group =>
+    ((group.map Phonology.withoutVowelLength).eraseDups).length > 1
+  IO.println s!"Среди {forms.length} форм совпадения при потере только долготы согласных — {consonantOnly.length}."
+  IO.println s!"Дополнительные совпадения при потере обеих долгот — {jointly.length}."
+  for group in consonantOnly ++ jointly do
     IO.println (String.intercalate " / " group)
 
 def main (args : List String) : IO Unit := do
@@ -638,7 +686,9 @@ def main (args : List String) : IO Unit := do
   checkListeningExamples sounds
   checkSoundRatings sounds
   checkMovementProfiles
-  checkVoiceExamples (← IO.FS.readFile (vault / "Залоги.md"))
+  let voice ← IO.FS.readFile (vault / "Залоги.md")
+  checkVoiceExamples voice
+  checkVoiceTense voice
   checkVoiceProfiles
   let questions ← IO.FS.readFile (vault / "Вопросительные слова.md")
   checkSpatialAnswers questions

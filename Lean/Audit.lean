@@ -100,6 +100,33 @@ private def checkFrameExamples (markdown : String) : IO Unit := do
     require (Frames.balances phrase) s!"Разорванная рамка тэ … эт: «{sample}»."
   IO.println s!"Рамки: {framed.length} примеров с тэ … эт имеют ожидаемые границы."
 
+private def checkAttribution (markdown : String) : IO Unit := do
+  let examples := (markdown.splitOn "\n").dropWhile (fun line =>
+    line.trimAscii.toString != "### Откуда известна новость")
+  let rows := examples.tail.takeWhile (!·.startsWith "#") |>.filterMap fun line => do
+    let [exampleText, sourceText, stance, content] := cells line | none
+    return (← codeWord exampleText, sourceText, stance, ← codeWord content)
+  require (!rows.isEmpty) "Не найдены примеры источника сведений."
+  for (exampleText, sourceText, stance, content) in rows do
+    let written := tokens (exampleText.replace "," " , ")
+    let some claim := Attribution.parse written |
+      throw (IO.userError s!"Не удалось разобрать сообщение «{exampleText}».")
+    let expectedSource := (claim.source.map (fun person => s!"`{person.word}`")).getD "—"
+    let expectedStance := match claim.stance with
+      | .plain => "утверждение"
+      | .possible => "возможно"
+      | .impossible => "невозможно"
+    require (expectedSource == sourceText && expectedStance == stance &&
+        Syntax.parse (tokens content) == some claim.content)
+      s!"Источник, уверенность или содержание «{exampleText}» разобраны иначе."
+    let bare := Attribution.render { claim with source := none }
+    let extra := if claim.source.isSome then 2 else 0
+    require (Attribution.wordCount written == Attribution.wordCount bare + extra)
+      s!"В «{exampleText}» источник должен занимать два слова."
+    for group in speechGroups exampleText do
+      checkSpeechGroup "Вложенные предложения.md" group
+  IO.println s!"Источник сведений: {rows.length} примеров, проверены источник, уверенность и содержание."
+
 private def checkListeningExamples (markdown : String) : IO Unit := do
   let rows := (markdown.splitOn "\n").filterMap fun line => do
     let [left, right, expected] := cells line | none
@@ -365,6 +392,24 @@ private def checkDistinctWordSound (word : String) : IO Unit := do
 
 private def personalPronouns : List Syntax.Person := [.speaker, .listener, .man, .woman, .neutral,
   .we, .inclusive, .exclusive, .youPlural, .polite, .men, .women, .neutralPlural]
+
+private def checkAttributionMarker : IO Unit := do
+  checkDistinctWordSound "мэн"
+  let wordProfiles := Morphology.reservedForms.map Phonology.withoutSoundLength |>.eraseDups
+  let profiles (marker : String) := personalPronouns.map
+    (fun person => Phonology.withoutSoundLength (marker ++ person.word))
+  let aliases := (profiles "эн").eraseDups.filter wordProfiles.contains
+  let current := personalPronouns.map (fun person =>
+    (Attribution.sourceWords (some person)).filter (· != ","))
+  let currentProfiles := current.map (Phonology.withoutSoundLength ∘ String.join)
+  require (currentProfiles.all (!wordProfiles.contains ·))
+    "Группа с источником сведений совпадает с одним словом при потере границ и долготы."
+  require (current.all (fun group => (sharedVowelBoundaries group).isEmpty &&
+    (Phonology.sharedConsonantBoundaries group).isEmpty))
+    "Маркер сведений образует повторяющийся звук на стыке с местоимением."
+  for group in current do
+    checkSpeechGroup "Источник сведений" group
+  IO.println s!"Маркер сведений: {current.length} местоимений, без словарных совпадений; с эн: {String.intercalate ", " aliases}."
 
 private def movementPhrases (times : List Syntax.Time) : List Syntax.Phrase :=
   let places : List Syntax.Place := [.garden, .house, .tree]
@@ -770,6 +815,8 @@ def main (args : List String) : IO Unit := do
   checkDeixis (← IO.FS.readFile (vault / "Грамматика.md"))
   checkNumerals (← IO.FS.readFile (vault / "Числа.md"))
   checkFrameExamples (← IO.FS.readFile (vault / "Проверка синтаксиса.md"))
+  checkAttribution (← IO.FS.readFile (vault / "Вложенные предложения.md"))
+  checkAttributionMarker
   let sounds ← IO.FS.readFile (vault / "Фонология.md")
   checkListeningExamples sounds
   checkSoundRatings sounds

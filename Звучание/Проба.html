@@ -26,6 +26,8 @@
     .ratings label { display: block; margin-top: 10px; }
     .ratings select { display: block; width: 100%; margin-top: 7px; }
     progress { display: block; width: 100%; accent-color: #745170; margin: 9px 0 22px; }
+    .prompt { margin: 0 0 18px; font: 600 clamp(25px, 6vw, 38px)/1.25 Georgia, serif; }
+    audio[controls] { width: 100%; }
     .muted { color: #615469; font-size: .9rem; }
     #message { color: #8a3744; }
     table { width: 100%; border-collapse: collapse; margin: 16px 0; text-align: left; }
@@ -33,6 +35,7 @@
     [hidden] { display: none !important; }
   </style>
   <script src="practices.js" defer></script>
+  <script src="recording.js" defer></script>
 </head>
 <body>
   <main>
@@ -43,7 +46,29 @@
     <section id="intro">
       <p id="about">Подготавливаются записи.</p>
       <p>Сначала выберите услышанные фразы. Затем прослушайте несколько пар и оцените мягкость и приятность каждой записи.</p>
-      <button type="button" class="primary" id="start" disabled>Начать</button>
+      <div class="actions">
+        <button type="button" class="primary" id="start" disabled>Начать пробу</button>
+        <button type="button" id="recordVoice" disabled>Записать голос</button>
+        <button type="button" id="openBundle" disabled>Открыть набор записей</button>
+        <input type="file" id="bundleFile" accept=".json,application/json" hidden>
+      </div>
+    </section>
+    <section id="recording" hidden aria-labelledby="recordingTitle">
+      <h2 id="recordingTitle" tabindex="-1">Запись голоса</h2>
+      <p>Читайте в обычном темпе, сохраняя одинаковую громкость. Для каждого голоса соберите свой набор.</p>
+      <p id="recordProgress" class="muted" role="status"></p>
+      <p id="recordPhrase" class="prompt" aria-live="polite"></p>
+      <div class="actions">
+        <button type="button" class="primary" id="capture">Записать фразу</button>
+        <button type="button" id="acceptTake" hidden>Принять запись</button>
+      </div>
+      <audio id="previewTake" aria-label="Прослушать запись" controls preload="metadata" hidden></audio>
+      <p id="recordStatus" class="muted" role="status"></p>
+      <div class="actions">
+        <button type="button" id="downloadBundle" disabled>Скачать набор</button>
+        <button type="button" class="primary" id="useBundle" hidden>Использовать в пробе</button>
+        <button type="button" id="backToIntro">Назад</button>
+      </div>
     </section>
     <section id="recognition" hidden aria-labelledby="recognitionTitle">
       <h2 id="recognitionTitle">Что прозвучало?</h2>
@@ -100,7 +125,7 @@
     const playRatings = [$('playA'), $('playB')];
     const ratingGroups = [[$('softnessA'), $('ratingA')], [$('softnessB'), $('ratingB')]];
     const ratings = ratingGroups.flat();
-    const stage = ['intro', 'recognition', 'preference', 'results'];
+    const stage = ['intro', 'recording', 'recognition', 'preference', 'results'];
     let trials, answers, ratingPairs, ratingIndex, preference, order, result, heard, received;
 
     function shuffle(items) {
@@ -117,13 +142,17 @@
       $('message').hidden = true;
     }
 
+    function showMessage(text) {
+      $('message').textContent = text;
+      $('message').hidden = false;
+    }
+
     function play(phrase, onEnd, onFailure) {
       $('message').hidden = true;
       $('audio').src = data.audio[phrase];
       $('audio').onended = onEnd;
       $('audio').play().catch(() => {
-        $('message').textContent = 'Запись не воспроизвелась. Попробуйте ещё раз.';
-        $('message').hidden = false;
+        showMessage('Запись не воспроизвелась. Попробуйте ещё раз.');
         onFailure();
       });
     }
@@ -261,18 +290,27 @@
       $('score').focus();
     }
 
-    $('save').onclick = () => {
-      const url = URL.createObjectURL(new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' }));
+    function downloadJson(value, name) {
+      const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }));
       const link = document.createElement('a');
       link.href = url;
-      link.download = 'laiu-listening-results.json';
+      link.download = name;
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-    };
+    }
+
+    $('save').onclick = () => downloadJson(result, 'laiu-listening-results.json');
 
     $('restart').onclick = start;
     $('start').onclick = start;
     let data;
+    function setListeningAudio(recordings) {
+      data = { ...data, ...recordings };
+      $('about').textContent = data.source === 'human'
+        ? 'В этой пробе звучат записи живой речи. Ответы сохраняются на вашем устройстве.'
+        : 'В этой пробе звучит синтетический голос. Результат относится к этим записям. Ответы остаются у вас.';
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
       data = window.laiuListening;
       if (!data) {
@@ -284,10 +322,11 @@
         $('about').textContent = 'Откройте страницу и practices.js из одного выпуска Laiu.';
         return;
       }
-      $('about').textContent = data.source === 'human'
-        ? 'В этой пробе звучат записи живой речи. Ответы сохраняются на вашем устройстве.'
-        : 'В этой пробе звучит синтетический голос. Результат относится к этим записям. Ответы остаются у вас.';
+      setListeningAudio(data);
       $('start').disabled = false;
+      if (window.enableLaiuRecording) {
+        window.enableLaiuRecording(Object.keys(data.audio), { show, showMessage, downloadJson, setListeningAudio });
+      }
     });
   </script>
 </body>

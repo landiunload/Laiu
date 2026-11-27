@@ -160,7 +160,10 @@ for (const [phrase, filename] of recordings) {
 }
 const data = { source: isHuman ? "human" : "synthetic", audioSet: fingerprint.digest("hex"), pairs, preference, audio };
 await writeFile(new URL("practices.js", destination), `window.laiuListening = ${JSON.stringify(data)};\n`);
-if (isHuman) await copyFile(new URL("Проба.html", output), new URL("Проба.html", destination));
+if (isHuman) {
+  await Promise.all(["Проба.html", "recording.js"].map(file =>
+    copyFile(new URL(file, output), new URL(file, destination))));
+}
 if (!isHuman) {
   // Keep synthesis state separate so changes to either group leave the other group's recordings intact.
   voice = await makeVoice();

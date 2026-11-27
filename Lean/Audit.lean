@@ -251,6 +251,24 @@ private def checkPolarityAnswers (markdown : String) : IO Unit := do
       s!"Ответ «{short}» на «{question}» не даёт полной реплики «{full}»."
   IO.println s!"Ответы ла и ли: {rows.length} примеров восстановлены пословно."
 
+private def checkReplyCorrections (markdown : String) : IO Unit := do
+  let sectionLines := (markdown.splitOn "\n").dropWhile (fun line =>
+    line.trimAscii.toString != "### Поправка в ответе")
+  let rows := sectionLines.tail.takeWhile (!·.startsWith "#") |>.filterMap fun line => do
+    let [question, reply, full, _] := cells line | none
+    return (← codeWord question, ← codeWord reply, ← codeWord full)
+  require (!rows.isEmpty) "Не найдены примеры поправок к общему вопросу."
+  for (question, reply, full) in rows do
+    let context := PolarityAnswers.readContext (spokenTokens question)
+    let some clause := Syntax.parse (tokens full) |
+      throw (IO.userError s!"Не удалось разобрать полную реплику «{full}».")
+    let words := tokens reply
+    require (PolarityAnswers.readReply context words == some clause &&
+      PolarityAnswers.compactReply context clause == words && words.length < (tokens full).length)
+      s!"Ответ «{reply}» на «{question}» не восстанавливает «{full}» в краткой форме."
+    checkSpeechGroup "Вопросительные слова.md" words
+  IO.println s!"Поправки в ответе: {rows.length} примеров, слова {(rows.map (fun (_, _, full) => (tokens full).length)).sum} / {(rows.map (fun (_, reply, _) => (tokens reply).length)).sum}."
+
 private def checkShortQuestions (markdown : String) : IO Unit := do
   let sectionLines := (markdown.splitOn "\n").dropWhile (fun line =>
     line.trimAscii.toString != "### Когда в вопросе можно опустить а")
@@ -440,6 +458,38 @@ private def checkMovementProfiles : IO Unit := do
   for marker in Syntax.Phase.stops.words do
     checkDistinctWordSound marker
   IO.println s!"Слитное движение без долготы гласных и согласных: {phrases.length} фраз, {profiles.size} звуковых профилей."
+
+private def checkReplyProfiles : IO Unit := do
+  let times : List Syntax.Time := [.implicit, .past, .present, .future]
+  let allClauses := movementPhrases times
+  let mut checked := 0
+  let mut saved := 0
+  for questionerPerson in personalPronouns do
+    if let some replyingPerson := PolarityAnswers.replyPerson questionerPerson then
+      let clauses := allClauses.filter (·.person == replyingPerson)
+      for time in times do
+        let question : Syntax.Phrase := ⟨questionerPerson, false, .neutral, .go, time, false, none⟩
+        let context := PolarityAnswers.readContext (Particles.renderUtterance ⟨question, some .neutral⟩)
+        let mut profiles : Std.HashMap String Syntax.Phrase := {}
+        for clause in clauses do
+          let full := Syntax.render clause
+          let reply := PolarityAnswers.compactReply context clause
+          require (PolarityAnswers.readReply context reply == some clause &&
+            (sharedVowelBoundaries reply).length ≤ (sharedVowelBoundaries full).length &&
+            (Phonology.sharedConsonantBoundaries reply).length ≤
+              (Phonology.sharedConsonantBoundaries full).length)
+            s!"Смысл или стык меняется в коротком ответе «{String.intercalate " " reply}»."
+          let profile := Phonology.withoutSoundLength (String.join reply)
+          let meaning := Syntax.compact clause
+          if let some earlier := profiles[profile]? then
+            require (earlier == meaning)
+              s!"Сливаются ответы «{String.intercalate " " (Syntax.render earlier)}» и «{String.intercalate " " full}»."
+          else
+            profiles := profiles.insert profile meaning
+          checked := checked + 1
+          saved := saved + (full.length - reply.length)
+          checkSpeechGroup "Короткие ответы о движении" reply
+  IO.println s!"Поправки о движении: {checked} случаев, убрано слов — {saved}, совпадений разных смыслов и новых повторных стыков нет."
 
 private def checkTimeClarificationProfiles : IO Unit := do
   let clauses := movementPhrases [.past, .future]
@@ -828,6 +878,8 @@ def main (args : List String) : IO Unit := do
   let questions ← IO.FS.readFile (vault / "Вопросительные слова.md")
   checkSpatialAnswers questions
   checkPolarityAnswers questions
+  checkReplyCorrections questions
+  checkReplyProfiles
   checkShortQuestions questions
   let transfer ← IO.FS.readFile (vault / "Обладание и передача.md")
   checkTransferAnswers transfer

@@ -7,6 +7,11 @@ inductive Person where
     youPlural | polite | men | women | neutralPlural
   deriving DecidableEq, Repr
 
+def Person.all : List Person := [.speaker, .listener, .man, .woman, .neutral,
+  .we, .inclusive, .exclusive, .youPlural, .polite, .men, .women, .neutralPlural]
+
+theorem Person.mem_all (person : Person) : person ∈ Person.all := by cases person <;> decide
+
 def Person.word : Person → String
   | .speaker => "и"
   | .listener => "а"

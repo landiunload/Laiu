@@ -408,8 +408,40 @@ private def checkDistinctWordSound (word : String) : IO Unit := do
   let resembling := Morphology.reservedForms.filter (fun form => Phonology.withoutVowelLength form == key)
   require (resembling == [word]) s!"Созвучная форма для «{word}»: {resembling}."
 
-private def personalPronouns : List Syntax.Person := [.speaker, .listener, .man, .woman, .neutral,
-  .we, .inclusive, .exclusive, .youPlural, .polite, .men, .women, .neutralPlural]
+private def personalPronouns : List Syntax.Person := Syntax.Person.all
+
+private def checkPossessives (markdown : String) : IO Unit := do
+  let lines := (markdown.splitOn "\n").dropWhile fun line =>
+    line.trimAscii.toString != "### Короткие формы с местоимениями"
+  let rows := lines.tail.takeWhile (!·.startsWith "#") |>.filterMap fun line => do
+    let [full, short, _] := cells line | none
+    return (← codeWord full, ← codeWord short)
+  require (!rows.isEmpty) "Не найдены примеры короткой принадлежности."
+  for (full, short) in rows do
+    let some group := Possessives.parseGroup (tokens full) |
+      throw (IO.userError s!"Не удалось разобрать группу «{full}».")
+    require (Possessives.renderGroup true group == tokens short &&
+      Possessives.parseGroup (tokens short) == some group && (tokens short).length + 1 == (tokens full).length)
+      s!"Форма «{short}» меняет принадлежность из «{full}»."
+  let profiles := Morphology.basicReservedForms.map Phonology.withoutSoundLength |>.eraseDups
+  let mut savedBoundaries := 0
+  for person in personalPronouns do
+    let word := Morphology.possessiveForm person
+    let signature := Phonology.withoutSoundLength word
+    require (!(profiles.any (signature.startsWith ·)))
+      s!"«{word}» звучит как прежнее слово или начинается с него."
+    for noun in Morphology.nouns do
+      let full := noun :: Possessives.renderFull person
+      let short := noun :: Possessives.renderShort person
+      require (Possessives.parseGroup full == Possessives.parseGroup short &&
+        (sharedVowelBoundaries short).length ≤ (sharedVowelBoundaries full).length &&
+        (Phonology.sharedConsonantBoundaries short).length ≤
+          (Phonology.sharedConsonantBoundaries full).length)
+        s!"В группе «{noun} {word}» меняется обладатель или появляется повторный стык."
+      savedBoundaries := savedBoundaries + (sharedVowelBoundaries full).length -
+        (sharedVowelBoundaries short).length
+      checkSpeechGroup "Короткие формы принадлежности" short
+  IO.println s!"Принадлежность: {rows.length} примеров, {personalPronouns.length * Morphology.nouns.length} сочетаний, убрано стыков — {savedBoundaries}."
 
 private def checkAttributionMarker : IO Unit := do
   checkDistinctWordSound "мэн"
@@ -941,6 +973,7 @@ def main (args : List String) : IO Unit := do
   checkShortQuestions questions
   let transfer ← IO.FS.readFile (vault / "Обладание и передача.md")
   checkTransferAnswers transfer
+  checkPossessives transfer
   let adverbs ← IO.FS.readFile (vault / "Наречия.md")
   checkTemporalAdverbs adverbs
   checkBriefDuration adverbs

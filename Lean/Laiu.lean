@@ -11,6 +11,7 @@ import Laiu.NumberWords
 import Laiu.OpenQuestions
 import Laiu.Particles
 import Laiu.Phonology
+import Laiu.Possessives
 import Laiu.PolarityAnswers
 import Laiu.References
 import Laiu.Script

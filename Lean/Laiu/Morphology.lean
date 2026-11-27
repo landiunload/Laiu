@@ -1,4 +1,5 @@
 import Laiu.Lexicon
+import Laiu.Syntax
 
 namespace Laiu.Morphology
 
@@ -73,10 +74,23 @@ theorem only_shared_two_suffix_forms :
     twoSuffixForms.filter (generated.contains ·) = ["кириам", "рариам", "мириам"] := by
   decide
 
-def reservedForms : List String :=
+def basicReservedForms : List String :=
   Lexicon.forms Lexicon.entries ++ generated ++ higherNumericForms ++ twoSuffixForms
 
-/-- A proposed compound must be fresh in all three checked inventories. -/
+def possessivePrefix : String := "сул"
+
+def possessiveForm (person : Syntax.Person) : String := possessivePrefix ++ person.word
+
+def possessiveForms : List String := Syntax.Person.all.map possessiveForm
+
+theorem possessive_forms_are_distinct : possessiveForms.Nodup := by decide
+
+theorem possessive_forms_are_fresh : possessiveForms.filter (basicReservedForms.contains ·) = [] := by
+  decide
+
+def reservedForms : List String := basicReservedForms ++ possessiveForms
+
+/-- A proposed compound must be fresh in the checked inventory. -/
 def proposeCompound (left right : String) : Option String :=
   let spelling := attach left right
   if spelling ∈ reservedForms then none else some spelling
@@ -96,11 +110,12 @@ theorem approved_compound_preserves_dictionary_uniqueness {left right spelling :
   refine List.nodup_cons.mpr ⟨?_, Lexicon.entries_have_no_duplicate_forms⟩
   intro present
   apply proposed_compound_is_fresh accepted
-  simp [reservedForms, present]
+  simp [reservedForms, basicReservedForms, present]
 
 example : proposeCompound "ки" "ти" = none := by decide
 example : proposeCompound "ко" "ти" = none := by decide
 example : proposeCompound "киур" "ри" = none := by decide
+example : proposeCompound "сул" "и" = none := by decide
 
 example : generated.length = 176 := by decide
 example : higherNumericForms.length = 54 := by decide

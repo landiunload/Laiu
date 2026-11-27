@@ -6,6 +6,7 @@ import Laiu.Logic
 import Laiu.Morphology
 import Laiu.Numbers
 import Laiu.NumberWords
+import Laiu.OpenQuestions
 import Laiu.Particles
 import Laiu.Phonology
 import Laiu.PolarityAnswers

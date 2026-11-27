@@ -1,4 +1,4 @@
-import Laiu.Syntax
+import Laiu.OpenQuestions
 
 namespace Laiu.SpatialAnswers
 
@@ -17,7 +17,7 @@ private def questionRelation : String → Option Relation
   | _ => none
 
 /-- This fragment handles ordinary questions addressed to a single listener. -/
-def readQuestion : List String → Option Context
+private def readExplicitQuestion : List String → Option Context
   | "эмбо" :: "а" :: "ри" :: time =>
     if time ∈ [[], ["ло"], ["лэ"], ["лу"]] then some ⟨["и", "ри"] ++ time, .location⟩ else none
   | word :: body => do
@@ -27,6 +27,12 @@ def readQuestion : List String → Option Context
       pure ⟨render { clause with person := .speaker }, relation⟩
     else none
   | [] => none
+
+def readQuestion (words : List String) (active : Option Directives.Addressee := none) : Option Context :=
+  readExplicitQuestion (OpenQuestions.restore active words)
+
+def compactQuestion (active : Option Directives.Addressee) (words : List String) : List String :=
+  OpenQuestions.compact active (fun explicit => (readExplicitQuestion explicit).isSome) words
 
 def short (context : Context) (place : Place) : List String :=
   spatialWords (some (context.relation, place))
@@ -104,6 +110,9 @@ example : recover (readQuestion ["эмбо", "а", "ри"]) ["ин", "тив"] =
     some ["и", "ри", "ин", "тив"] := by decide
 example : recover (readQuestion ["эмкуа", "а", "ки", "лу"]) ["куа", "тив"] =
     some ["и", "ки", "лу", "куа", "тив"] := by decide
+example : readQuestion ["эмкуа", "ки", "лу"] (some .one) =
+    readQuestion ["эмкуа", "а", "ки", "лу"] := by decide
+example : readQuestion ["эмбо", "ри"] = none := by decide
 example : recover (readQuestion ["эмэн", "а", "ки"]) ["эн", "тив"] =
     some ["и", "ки", "эн", "тив"] := by decide
 example : recover (readQuestion ["эмэн", "а", "ки"]) ["ин", "тив"] = none := by decide

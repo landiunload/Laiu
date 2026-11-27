@@ -1,5 +1,4 @@
-import Laiu.Phonology
-import Laiu.Syntax
+import Laiu.OpenQuestions
 
 namespace Laiu.TransferAnswers
 
@@ -54,7 +53,7 @@ structure Context where
   item : Item
   deriving DecidableEq, Repr
 
-def readQuestion : List String → Option Context
+private def readExplicitQuestion : List String → Option Context
   | interrogative :: "а" :: rest => do
     let role ← readRole interrogative
     let (phase, rest) := takePhase rest
@@ -65,6 +64,12 @@ def readQuestion : List String → Option Context
     let item ← readItem item
     return ⟨role, action, phase, time, result, item⟩
   | _ => none
+
+def readQuestion (words : List String) (active : Option Directives.Addressee := none) : Option Context :=
+  readExplicitQuestion (OpenQuestions.restore active words)
+
+def compactQuestion (active : Option Directives.Addressee) (words : List String) : List String :=
+  OpenQuestions.compact active (fun explicit => (readExplicitQuestion explicit).isSome) words
 
 def full (context : Context) (person : Person) : List String :=
   (["и"] ++ context.phase.words ++ [context.action.word] ++ context.time.words ++
@@ -131,6 +136,10 @@ theorem short_has_no_word_junction (person : Person) :
 
 example : recover (readQuestion ["эмкуа", "а", "му", "лу", "ил"]) ["а"] =
     some ["и", "му", "лу", "ил", "куа", "а"] := by decide
+example : recover (readQuestion ["эмкуа", "му", "лу", "ил"] (some .one)) ["а"] =
+    some ["и", "му", "лу", "ил", "куа", "а"] := by decide
+example : compactQuestion (some .group) ["эмкуа", "а", "му", "лу", "ил"] =
+    ["эмкуа", "а", "му", "лу", "ил"] := by decide
 
 example : recover (readQuestion ["эмэн", "а", "ку", "ло", "ка", "вус"]) ["эн", "у"] =
     some ["и", "ку", "ло", "ка", "вус", "эн", "у"] := by decide

@@ -187,7 +187,9 @@ private def checkTransferAnswers (markdown : String) : IO Unit := do
   IO.println s!"Передача: восстановлено коротких ответов — {rows.length}, убрано стыков — {removed}."
 
 private def checkPolarityAnswers (markdown : String) : IO Unit := do
-  let rows := (markdown.splitOn "\n").filterMap fun line => do
+  let sectionLines := (markdown.splitOn "\n").dropWhile (fun line =>
+    line.trimAscii.toString != "### Короткие ответы")
+  let rows := (sectionLines.tail.takeWhile (!·.startsWith "#")).filterMap fun line => do
     let [question, short, full, _] := cells line | none
     return (← codeWord question, ← codeWord short, ← codeWord full)
   require (!rows.isEmpty) "Не найдены примеры ответов ла и ли."
@@ -201,6 +203,40 @@ private def checkPolarityAnswers (markdown : String) : IO Unit := do
       PolarityAnswers.compact context clause == reply && reply.length < fullWords.length)
       s!"Ответ «{short}» на «{question}» не даёт полной реплики «{full}»."
   IO.println s!"Ответы ла и ли: {rows.length} примеров восстановлены пословно."
+
+private def checkShortQuestions (markdown : String) : IO Unit := do
+  let sectionLines := (markdown.splitOn "\n").dropWhile (fun line =>
+    line.trimAscii.toString != "### Когда в вопросе можно опустить а")
+  let rows := (sectionLines.tail.takeWhile (!·.startsWith "#")).filterMap fun line => do
+    let [full, short, answer, expanded] := cells line | none
+    return (← codeWord full, ← codeWord short, ← codeWord answer, ← codeWord expanded)
+  require (!rows.isEmpty) "Не найдены примеры вопросов со скрытым адресатом."
+  let mut removed := 0
+  let junctions := fun words => (Phonology.sharedVowelBoundaries words).length
+  for (full, short, answer, expanded) in rows do
+    let explicit := spokenTokens full
+    let implicit := spokenTokens short
+    let reply := spokenTokens answer
+    let expected := spokenTokens expanded
+    let active : Option Directives.Addressee := some .one
+    require (implicit.length + 1 == explicit.length && junctions implicit ≤ junctions explicit &&
+      OpenQuestions.restore active implicit == explicit)
+      s!"«{short}» должно убирать ровно местоимение из «{full}»."
+    require ((SpatialAnswers.readQuestion implicit).isNone && (TransferAnswers.readQuestion implicit).isNone)
+      s!"Вопрос «{short}» требует явно заданного адресата."
+    let valid := match SpatialAnswers.readQuestion explicit, TransferAnswers.readQuestion explicit with
+      | some context, none =>
+        SpatialAnswers.compactQuestion active explicit == implicit &&
+          SpatialAnswers.readQuestion implicit active == some context &&
+          SpatialAnswers.recover (some context) reply == some expected
+      | none, some context =>
+        TransferAnswers.compactQuestion active explicit == implicit &&
+          TransferAnswers.readQuestion implicit active == some context &&
+          TransferAnswers.recover (some context) reply == some expected
+      | _, _ => false
+    require valid s!"После «{short}» ответ «{answer}» должен восстанавливаться как «{expanded}»."
+    removed := removed + (junctions explicit - junctions implicit)
+  IO.println s!"Проверено коротких вопросов — {rows.length}, убрано стыков — {removed}."
 
 private def checkTemporalAdverbs (markdown : String) : IO Unit := do
   let rows := (markdown.splitOn "\n").filterMap fun line => do
@@ -509,6 +545,11 @@ private def checkGardenDialogue (markdown : String) : IO Unit := do
     require (Frames.balances phrase) s!"Реплика «{text}»: нарушены границы рамки."
     for group in groups do
       checkSpeechGroup "Разговор в саду.md" group
+      match group.head? with
+      | some "эмбо" | some "эмкуа" | some "эмэн" =>
+        require ((SpatialAnswers.readQuestion group (some .one)).isSome)
+          s!"В разговоре в саду не удалось прочитать вопрос «{String.intercalate " " group}»."
+      | _ => pure ()
     boundaries := boundaries ++ groups.flatMap sharedVowelBoundaries
   IO.println s!"Разговор в саду: {turns.length} живых реплик сверены со словарём и рамками."
   IO.println s!"Слов в диалоге: {wordCount}."
@@ -573,6 +614,7 @@ def main (args : List String) : IO Unit := do
   let questions ← IO.FS.readFile (vault / "Вопросительные слова.md")
   checkSpatialAnswers questions
   checkPolarityAnswers questions
+  checkShortQuestions questions
   checkTransferAnswers (← IO.FS.readFile (vault / "Обладание и передача.md"))
   let adverbs ← IO.FS.readFile (vault / "Наречия.md")
   checkTemporalAdverbs adverbs

@@ -156,6 +156,19 @@ theorem initial_short_range_time_survives_duration_and_boundary_loss
   simp [front, personal] at onset
   exact different onset.symm
 
+theorem final_short_range_time_survives_with_its_particle
+    (timed : TimedUtterance) (shortRange : timed.adverb.prefersFrontWhenTied = true) :
+    Phonology.withoutVowelLength (String.join (render timed .final)) ≠
+      Phonology.withoutVowelLength (String.join (renderUtterance timed.body)) := by
+  have different :
+      (timed.adverb.word.toList.filter (!Phonology.isVowel ·)).length ≠
+        (("".toList).filter (!Phonology.isVowel ·)).length := by
+    cases adverb : timed.adverb <;> simp_all [Adverb.prefersFrontWhenTied] <;> decide
+  simpa [render, renderUtterance, String.join_append, String.join_cons, String.append_assoc] using
+    Phonology.distinct_consonant_counts_survive_in_context timed.adverb.word ""
+      (String.join (Syntax.render timed.body.clause))
+      (String.join (timed.body.question.toList.map Question.word)) different
+
 theorem smoother_position_preserves_parse (utterance : TimedUtterance) :
     parse (render utterance (smootherPosition utterance)) = some utterance :=
   parse_render utterance _

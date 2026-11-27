@@ -231,6 +231,36 @@ private def checkTimeCompaction (markdown : String) : IO Unit := do
       s!"Для «{original}» ожидается другая форма."
   IO.println s!"Время с наречиями проверено на примерах ({rows.length})."
 
+private def checkTimeClarification (markdown : String) : IO Unit := do
+  let sectionLines := (markdown.splitOn "\n").dropWhile (fun line =>
+    line.trimAscii.toString != "### Если долготу трудно расслышать")
+  let rows := (sectionLines.tail.takeWhile (!·.startsWith "#")).filterMap fun line => do
+    let [bare, compact, clear] := cells line | none
+    return (← codeWord bare, ← codeWord compact, ← codeWord clear)
+  require (!rows.isEmpty) "Не найдены примеры уточнения времени."
+  let sound := fun words => Phonology.withoutVowelLength (String.join words)
+  for (bare, compact, clear) in rows do
+    let bareWords := spokenTokens bare
+    let shortWords := spokenTokens compact
+    let clearWords := spokenTokens clear
+    let some explicit := Particles.parseUtterance bareWords |
+      throw (IO.userError s!"Не удалось разобрать короткую реплику «{bare}».")
+    let some marked := TemporalAdverbs.parse clearWords |
+      throw (IO.userError s!"Не удалось разобрать уточнение «{clear}».")
+    let some short := TemporalAdverbs.compact marked .present |
+      throw (IO.userError s!"Частица и наречие расходятся в «{clear}».")
+    let initial := TemporalAdverbs.render short .initial
+    require (marked.adverb.prefersFrontWhenTied && marked.body == explicit &&
+      TemporalAdverbs.render marked .final == clearWords &&
+      TemporalAdverbs.render short .final == shortWords && shortWords.length + 1 == clearWords.length)
+      s!"«{clear}» должно добавлять только совпадающую частицу к «{compact}»."
+    let junctions := TemporalAdverbs.boundaryCount
+    require (junctions shortWords < junctions initial && junctions clearWords == junctions shortWords)
+      s!"«{clear}» должно сохранять число стыков из «{compact}»."
+    require (sound bareWords == sound shortWords && sound bareWords != sound clearWords)
+      s!"Уточнение «{clear}» должно восстанавливать различие с «{bare}»."
+  IO.println s!"Уточнение близкого времени: {rows.length} примера различимы без долготы."
+
 private def checkDistinctWordSound (word : String) : IO Unit := do
   let key := Phonology.withoutVowelLength word
   let resembling := Morphology.reservedForms.filter (fun form => Phonology.withoutVowelLength form == key)
@@ -239,18 +269,20 @@ private def checkDistinctWordSound (word : String) : IO Unit := do
 private def personalPronouns : List Syntax.Person := [.speaker, .listener, .man, .woman, .neutral,
   .we, .inclusive, .exclusive, .youPlural, .polite, .men, .women, .neutralPlural]
 
-private def checkMovementProfiles : IO Unit := do
+private def movementPhrases (times : List Syntax.Time) : List Syntax.Phrase :=
   let places : List Syntax.Place := [.garden, .house, .tree]
   let relations : List Syntax.Relation := [.location, .direction, .source]
   let settings := none :: relations.flatMap fun relation => places.map fun place => some (relation, place)
-  let phrases : List Syntax.Phrase :=
-    personalPronouns.flatMap fun person =>
-    [false, true].flatMap fun negative =>
-    [Syntax.Phase.neutral, .starts, .stops].flatMap fun phase =>
-    [Syntax.Travel.go, .returnTo, .move].flatMap fun travel =>
-    [Syntax.Time.implicit, .past, .present, .future].flatMap fun time =>
-    [false, true].flatMap fun result =>
-    settings.map fun spatial => ⟨person, negative, phase, travel, time, result, spatial⟩
+  personalPronouns.flatMap fun person =>
+  [false, true].flatMap fun negative =>
+  [Syntax.Phase.neutral, .starts, .stops].flatMap fun phase =>
+  [Syntax.Travel.go, .returnTo, .move].flatMap fun travel =>
+  times.flatMap fun time =>
+  [false, true].flatMap fun result =>
+  settings.map fun spatial => ⟨person, negative, phase, travel, time, result, spatial⟩
+
+private def checkMovementProfiles : IO Unit := do
+  let phrases := movementPhrases [.implicit, .past, .present, .future]
   let mut profiles : Std.HashMap String Syntax.Phrase := {}
   for clause in phrases do
     let spoken := Phonology.withoutVowelLength (String.join (Syntax.render clause))
@@ -266,6 +298,28 @@ private def checkMovementProfiles : IO Unit := do
   for marker in Syntax.Phase.stops.words do
     checkDistinctWordSound marker
   IO.println s!"Проверка слитной речи охватывает {phrases.length} фраз движения и {profiles.size} звуковых профилей."
+
+private def checkTimeClarificationProfiles : IO Unit := do
+  let clauses := movementPhrases [.past, .future]
+  let questions : List (Option Particles.Question) :=
+    [none, some .neutral, some (.biased .confirm), some (.biased .deny)]
+  let sound := fun words => Phonology.withoutVowelLength (String.join words)
+  let junctions := TemporalAdverbs.boundaryCount
+  let mut repairs := 0
+  for clause in clauses do
+    let adverb : TemporalAdverbs.Adverb := if clause.time == .past then .recently else .soon
+    for question in questions do
+      let marked : TemporalAdverbs.TimedUtterance := ⟨⟨clause, question⟩, adverb⟩
+      let compact := marked.withoutTimeParticle
+      let bare := Particles.renderUtterance marked.body
+      let clear := TemporalAdverbs.render marked .final
+      let short := TemporalAdverbs.render compact .final
+      require (TemporalAdverbs.compact marked .present == some compact && junctions clear ≤ junctions short &&
+        sound clear != sound bare)
+        s!"Не удалось уточнить время в «{String.intercalate " " short}»."
+      if sound short == sound bare && junctions short < junctions (TemporalAdverbs.render compact .initial) then
+        repairs := repairs + 1
+  IO.println s!"Уточнение времени проверено в {clauses.length * questions.length} случаях; в {repairs} короткая форма сливается, а перенос добавляет стык."
 
 private def checkVoiceExamples (markdown : String) : IO Unit := do
   let rows := (markdown.splitOn "\n").filterMap fun line => do
@@ -500,6 +554,8 @@ def main (args : List String) : IO Unit := do
   let adverbs ← IO.FS.readFile (vault / "Наречия.md")
   checkTemporalAdverbs adverbs
   checkTimeCompaction adverbs
+  checkTimeClarification adverbs
+  checkTimeClarificationProfiles
   let connectors ← IO.FS.readFile (vault / "Подчинительные союзы.md")
   checkConditionals connectors
   checkChoices connectors

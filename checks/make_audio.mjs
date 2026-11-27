@@ -70,10 +70,10 @@ if (isHuman) {
 } else {
   const engine = mode ? pathToFileURL(resolve(mode)).href : "@echogarden/espeak-ng-emscripten";
   const { default: init } = await import(engine);
-  makeVoice = async () => {
+  makeVoice = async (language = "es") => {
     const module = await init();
     const worker = new module.eSpeakNGWorker();
-    worker.set_voice("es");
+    worker.set_voice(language);
     worker.set_rate(145);
     worker.set_pitch(53);
     return worker;
@@ -109,7 +109,9 @@ function pronounce(word) {
   return sounds;
 }
 
-function synthesize(text) {
+class PronunciationMismatch extends Error {}
+
+function synthesize(text, speaker = voice) {
   const input = text.toLowerCase().split(/([,.?!])/u).map((group) => {
     if (/^[,.?!]$/u.test(group)) return group + " ";
     const words = group.trim().split(/\s+/u).filter(Boolean);
@@ -117,7 +119,7 @@ function synthesize(text) {
   }).join("");
   const audio = [];
   const heard = [];
-  voice.synthesize(input, (samples, events) => {
+  speaker.synthesize(input, (samples, events) => {
     for (const event of events) {
       if (event.type === "phoneme" && event.id) heard.push(event.id.replace(/[ˈˌː]/gu, ""));
     }
@@ -134,7 +136,7 @@ function synthesize(text) {
     ),
   );
   if (heard.join(" ") !== expected.join(" ")) {
-    throw new Error(`Звуковой состав «${text}»: ожидалось ${expected.join(" ")}, получено ${heard.join(" ")}`);
+    throw new PronunciationMismatch(`Звуковой состав «${text}»: ожидалось ${expected.join(" ")}, получено ${heard.join(" ")}`);
   }
   return Buffer.concat(audio);
 }
@@ -156,12 +158,26 @@ function wave(pcm) {
   return Buffer.concat([header, pcm]);
 }
 
+function synthesizeExample(lines, speaker) {
+  return Buffer.concat(lines.flatMap((line, index) => {
+    const speech = synthesize(line, speaker);
+    return index === 0 ? [speech] : [Buffer.alloc(sampleRate), speech];
+  }));
+}
+
 async function writeExamples(examples) {
+  let alternateVoice;
   for (const [, filename, transcript] of examples) {
-    const pcm = Buffer.concat(transcriptLines(transcript).flatMap((line, index) => {
-      const speech = synthesize(line);
-      return index === 0 ? [speech] : [Buffer.alloc(sampleRate), speech];
-    }));
+    const lines = transcriptLines(transcript);
+    let pcm;
+    try {
+      pcm = synthesizeExample(lines, voice);
+    } catch (error) {
+      if (!(error instanceof PronunciationMismatch)) throw error;
+      // Retry the whole example so both variants still use the same voice.
+      alternateVoice ??= await makeVoice("pt");
+      pcm = synthesizeExample(lines, alternateVoice);
+    }
     await writeFile(new URL(encodeURIComponent(filename), output), wave(pcm));
     console.log(`${filename}: ${(pcm.length / (2 * sampleRate)).toFixed(2)} с`);
   }

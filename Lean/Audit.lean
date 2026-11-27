@@ -186,6 +186,26 @@ private def checkTransferAnswers (markdown : String) : IO Unit := do
     removed := removed + (Phonology.sharedVowelBoundaries fullWords).length
   IO.println s!"Передача: восстановлено коротких ответов — {rows.length}, убрано стыков — {removed}."
 
+private def checkTimeAnswers (markdown : String) : IO Unit := do
+  let sectionLines := (markdown.splitOn "\n").dropWhile (fun line =>
+    line.trimAscii.toString != "#### Краткий ответ на «когда?»")
+  let rows := (sectionLines.tail.takeWhile (!·.startsWith "#")).filterMap fun line => do
+    let [question, full, short, _] := cells line | none
+    return (← codeWord question, ← codeWord full, ← codeWord short)
+  require (!rows.isEmpty) "Не найдены краткие ответы на «когда?»."
+  let mut removed := 0
+  let junctions := fun words => (Phonology.sharedVowelBoundaries words).length
+  for (question, full, short) in rows do
+    let context := TimeAnswers.readQuestion (spokenTokens question)
+    let fullWords := spokenTokens full
+    let shortWords := spokenTokens short
+    require (context.isSome && TimeAnswers.compact context fullWords == shortWords &&
+      TimeAnswers.recover context shortWords == some fullWords &&
+      shortWords.length + 1 == fullWords.length && junctions shortWords ≤ junctions fullWords)
+      s!"После «{question}» ответ «{short}» должен восстанавливаться как «{full}»."
+    removed := removed + (junctions fullWords - junctions shortWords)
+  IO.println s!"Ответов на «когда?» восстановлено — {rows.length}, убрано стыков — {removed}."
+
 private def checkPolarityAnswers (markdown : String) : IO Unit := do
   let sectionLines := (markdown.splitOn "\n").dropWhile (fun line =>
     line.trimAscii.toString != "### Короткие ответы")
@@ -463,7 +483,9 @@ private def checkDeixis (markdown : String) : IO Unit := do
   IO.println "Указательные формы: расстояние и назначение сверены с грамматикой."
 
 private def checkConditionals (markdown : String) : IO Unit := do
-  let rows := (markdown.splitOn "\n").filterMap fun line => do
+  let sectionLines := (markdown.splitOn "\n").dropWhile (fun line =>
+    line.trimAscii.toString != "### Условная связь")
+  let rows := (sectionLines.tail.takeWhile (!·.startsWith "#")).filterMap fun line => do
     let [connector, kind, exampleText, _] := cells line | none
     return (← codeWord connector, kind, ← codeWord exampleText)
   let [(plain, _, first), (irrealis, _, second)] := rows |
@@ -534,10 +556,11 @@ private def checkGardenDialogue (markdown : String) : IO Unit := do
   let known := Morphology.reservedForms
   let mut boundaries := []
   let mut wordCount := 0
+  let mut temporalQuestion := none
   for row in turns do
     let [_, written, _] := row | throw (IO.userError s!"Неверный формат реплики: {row}.")
     let ["", text, ""] := written.splitOn "**" | throw (IO.userError s!"Не читается реплика: {written}.")
-    let groups := speechGroups text
+    let groups := (speechGroups text).filter (!·.isEmpty)
     let phrase := groups.flatten
     wordCount := wordCount + phrase.length
     for word in phrase do
@@ -545,6 +568,11 @@ private def checkGardenDialogue (markdown : String) : IO Unit := do
     require (Frames.balances phrase) s!"Реплика «{text}»: нарушены границы рамки."
     for group in groups do
       checkSpeechGroup "Разговор в саду.md" group
+      if temporalQuestion.isSome then
+        let event := if group.head? == some "луа" then group.tail else group
+        require ((TimeAnswers.recover temporalQuestion event).isSome)
+          s!"Не удалось понять ответ о времени «{String.intercalate " " group}»."
+      temporalQuestion := TimeAnswers.readQuestion group
       match group.head? with
       | some "эмбо" | some "эмкуа" | some "эмэн" =>
         require ((SpatialAnswers.readQuestion group (some .one)).isSome)
@@ -553,7 +581,8 @@ private def checkGardenDialogue (markdown : String) : IO Unit := do
     boundaries := boundaries ++ groups.flatMap sharedVowelBoundaries
   IO.println s!"Разговор в саду: {turns.length} живых реплик сверены со словарём и рамками."
   IO.println s!"Слов в диалоге: {wordCount}."
-  IO.println s!"Стыки одинаковых гласных в диалоге ({boundaries.length}): {formatBoundaries boundaries}."
+  let detail := if boundaries.isEmpty then "" else s!" ({formatBoundaries boundaries})"
+  IO.println s!"Стыков одинаковых гласных внутри реплик — {boundaries.length}{detail}."
 
 private def checkBenchmarks (markdown : String) : IO Unit := do
   let table := (markdown.splitOn "\n").map cells
@@ -624,6 +653,7 @@ def main (args : List String) : IO Unit := do
   let connectors ← IO.FS.readFile (vault / "Подчинительные союзы.md")
   checkConditionals connectors
   checkChoices connectors
+  checkTimeAnswers connectors
   checkDirectives (← IO.FS.readFile (vault / "Модальность.md"))
   checkGardenDialogue (← IO.FS.readFile (vault / "Разговор в саду.md"))
   checkBenchmarks (← IO.FS.readFile (vault / "Формальный анализ.md"))

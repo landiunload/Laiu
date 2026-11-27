@@ -16,5 +16,6 @@ import Laiu.Shortening
 import Laiu.SpatialAnswers
 import Laiu.Syntax
 import Laiu.TemporalAdverbs
+import Laiu.TimeAnswers
 import Laiu.TransferAnswers
 import Laiu.Voice

@@ -12,15 +12,25 @@ if (clips.length === 0) throw new Error("В фонологии нет разме
 const transcriptLines = (transcript) => [...transcript.matchAll(/\*\*`([^`]+)`\*\*/gu)].map((match) => match[1]);
 const pairs = [...notes.matchAll(/^\| `([^`\n]+)` \| `([^`\n]+)` \| (?:сохраняется|теряется) \|$/gmu)]
   .map(([, a, b], index) => ({ id: String(index + 1).padStart(2, "0"), phrases: [a, b] }));
-const preference = transcriptLines(clips.find((clip) => clip[1] === "Сейчас.wav")?.[2] ?? "");
-if (pairs.length === 0 || preference.length !== 2) throw new Error("В фонологии недостаёт пар для пробы");
+const ratingSection = notes.split("\n### Оценка звучания\n")[1]?.split("\n> [!note]", 1)[0] ?? "";
+const preference = [...ratingSection.matchAll(/^\| ([a-z]+) \| ([^|\n]+) \| `([^`\n]+)` \| `([^`\n]+)` \|$/gmu)]
+  .map(([, id, title, first, second]) => ({ id, title, phrases: [first, second] }));
+if (pairs.length === 0 || preference.length === 0) throw new Error("В фонологии недостаёт пар для пробы");
+if (new Set(preference.map(({ id }) => id)).size !== preference.length ||
+    preference.some(({ phrases }) => phrases[0] === phrases[1])) {
+  throw new Error("У каждой пары для оценки должен быть свой код и две разные фразы");
+}
 const recordings = new Map();
 for (const { id, phrases } of pairs) {
   phrases.forEach((phrase, side) => {
     if (!recordings.has(phrase)) recordings.set(phrase, `pair-${id}-${"ab"[side]}.wav`);
   });
 }
-preference.forEach((phrase, side) => recordings.set(phrase, `order-${"ab"[side]}.wav`));
+for (const { id, phrases } of preference) {
+  phrases.forEach((phrase, side) => {
+    if (!recordings.has(phrase)) recordings.set(phrase, `${id}-${"ab"[side]}.wav`);
+  });
+}
 
 const [mode, folder] = process.argv.slice(2);
 if (mode === "--list") {

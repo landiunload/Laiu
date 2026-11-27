@@ -1,6 +1,7 @@
 """Check links and listening material shared by GitHub and Obsidian."""
 
 import base64
+import hashlib
 import io
 import json
 import re
@@ -79,11 +80,15 @@ def check_listening_material():
     audio_dir = ROOT / "Звучание"
     notes = (ROOT / "Фонология.md").read_text(encoding="utf-8")
     pairs = re.findall(r"^\| `([^`\n]+)` \| `([^`\n]+)` \| (?:сохраняется|теряется) \|$", notes, re.MULTILINE)
-    _, marker, after_marker = notes.partition("![[Звучание/Сейчас.wav]]\n")
-    if not marker:
-        raise ValueError("В фонологии нет аудиопримера с двумя порядками слов")
-    order_example = after_marker.split("\n>\n", 1)[0]
-    order = re.findall(r"\*\*`([^`]+)`\*\*", order_example)
+    _, _, rating_section = notes.partition("\n### Оценка звучания\n")
+    rating_rows = re.findall(
+        r"^\| ([a-z]+) \| ([^|\n]+) \| `([^`\n]+)` \| `([^`\n]+)` \|$",
+        rating_section.split("\n> [!note]", 1)[0], re.MULTILINE,
+    )
+    preference = [{"id": code, "title": title, "phrases": [first, second]}
+                  for code, title, first, second in rating_rows]
+    if not preference or len({item["id"] for item in preference}) != len(preference):
+        raise ValueError("У пар оценки должны быть разные коды")
     script = (audio_dir / "practices.js").read_text(encoding="utf-8").strip()
     prefix = "window.laiuListening = "
     if not script.startswith(prefix) or not script.endswith(";"):
@@ -91,11 +96,14 @@ def check_listening_material():
     trial = json.loads(script[len(prefix):-1])
     if trial["source"] != "synthetic":
         raise ValueError("Публичная проба должна использовать синтетический набор")
-    if [tuple(item["phrases"]) for item in trial["pairs"]] != pairs or trial["preference"] != order:
+    if [tuple(item["phrases"]) for item in trial["pairs"]] != pairs or trial["preference"] != preference:
         raise ValueError("Фразы пробы расходятся с фонологией")
-    phrases = {phrase for pair in pairs for phrase in pair} | set(order)
+    phrases = {phrase for pair in pairs for phrase in pair} | {
+        phrase for item in preference for phrase in item["phrases"]
+    }
     if set(trial["audio"]) != phrases:
         raise ValueError("Набор WAV не соответствует фразам пробы")
+    fingerprint = hashlib.sha256()
     for phrase, uri in trial["audio"].items():
         audio_prefix = "data:audio/wav;base64,"
         if not uri.startswith(audio_prefix):
@@ -104,6 +112,10 @@ def check_listening_material():
         with wave.open(io.BytesIO(decoded)) as audio:
             if audio.getnframes() <= 0:
                 raise ValueError(f"Пустая запись для «{phrase}»")
+        fingerprint.update(phrase.encode("utf-8"))
+        fingerprint.update(decoded)
+    if trial["audioSet"] != fingerprint.hexdigest():
+        raise ValueError("Идентификатор набора не совпадает с WAV-записями")
     return len(phrases)
 
 

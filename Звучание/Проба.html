@@ -42,7 +42,7 @@
     </header>
     <section id="intro">
       <p id="about">Подготавливаются записи.</p>
-      <p>Сначала выберите услышанную фразу. Затем прослушайте два порядка слов и оцените мягкость и приятность каждого.</p>
+      <p>Сначала выберите услышанные фразы. Затем прослушайте несколько пар и оцените мягкость и приятность каждой записи.</p>
       <button type="button" class="primary" id="start" disabled>Начать</button>
     </section>
     <section id="recognition" hidden aria-labelledby="recognitionTitle">
@@ -57,6 +57,7 @@
     </section>
     <section id="preference" hidden aria-labelledby="preferenceTitle">
       <h2 id="preferenceTitle">Как звучит каждый вариант?</h2>
+      <p id="preferenceCount" class="muted" aria-live="polite"></p>
       <p>Оцените оба после прослушивания. Одинаковые оценки тоже подходят.</p>
       <form id="ratingsForm">
         <div class="ratings">
@@ -78,11 +79,12 @@
     </section>
     <section id="results" hidden aria-labelledby="score">
       <h2 id="score" tabindex="-1"></h2>
-      <p id="rated"></p>
       <table>
         <thead><tr><th scope="col">Пара</th><th scope="col">Верно</th></tr></thead>
         <tbody id="scores"></tbody>
       </table>
+      <h3>Оценки звучания</h3>
+      <div id="rated"></div>
       <div class="actions">
         <button type="button" id="save" class="primary">Скачать ответы</button>
         <button type="button" id="restart">Пройти ещё раз</button>
@@ -99,7 +101,7 @@
     const ratingGroups = [[$('softnessA'), $('ratingA')], [$('softnessB'), $('ratingB')]];
     const ratings = ratingGroups.flat();
     const stage = ['intro', 'recognition', 'preference', 'results'];
-    let trials, answers, order, result, heard, received;
+    let trials, answers, ratingPairs, ratingIndex, preference, order, result, heard, received;
 
     function shuffle(items) {
       const copy = [...items];
@@ -129,7 +131,7 @@
     function next() {
       if (answers.length === trials.length) {
         show('preference');
-        playRatings[0].focus();
+        nextRatingPair();
         return;
       }
       const trial = trials[answers.length];
@@ -148,14 +150,23 @@
     function start() {
       trials = shuffle(data.pairs.flatMap(({ id, phrases }) => phrases.map((phrase) =>
         ({ id, phrase, options: shuffle(phrases) }))));
-      order = shuffle(data.preference);
       answers = [];
-      heard = [false, false];
-      ratings.forEach((select) => { select.disabled = true; select.value = ''; });
-      $('finish').disabled = true;
+      ratingPairs = shuffle(data.preference);
+      ratingIndex = 0;
+      preference = [];
       $('progress').max = trials.length;
       show('recognition');
       next();
+    }
+
+    function nextRatingPair() {
+      order = shuffle(ratingPairs[ratingIndex].phrases);
+      heard = [false, false];
+      ratings.forEach((select) => { select.disabled = true; select.value = ''; });
+      $('preferenceCount').textContent = `Пара ${ratingIndex + 1} из ${ratingPairs.length}`;
+      $('finish').disabled = true;
+      $('finish').textContent = ratingIndex + 1 === ratingPairs.length ? 'Показать результат' : 'Следующая пара';
+      playRatings[0].focus();
     }
 
     $('play').onclick = () => {
@@ -205,17 +216,40 @@
 
     $('ratingsForm').onsubmit = (event) => {
       event.preventDefault();
-      if (!heard.every(Boolean) || !ratings.every((rating) => rating.value)) return;
-      const preference = order.map((phrase, index) => {
+      if (ratingIndex >= ratingPairs.length || !heard.every(Boolean) || !ratings.every((rating) => rating.value)) return;
+      $('finish').disabled = true;
+      order.forEach((phrase, index) => {
         const [softness, pleasantness] = ratingGroups[index];
-        return { phrase, softness: Number(softness.value), rating: Number(pleasantness.value) };
+        preference.push({
+          pair: ratingPairs[ratingIndex].id,
+          phrase,
+          softness: Number(softness.value),
+          rating: Number(pleasantness.value),
+        });
       });
-      result = { version: 2, source: data.source, audioSet: data.audioSet, answers, preference };
+      ratingIndex++;
+      if (ratingIndex < ratingPairs.length) {
+        nextRatingPair();
+        return;
+      }
+      showResults();
+    };
+
+    function showResults() {
+      result = { version: 3, source: data.source, audioSet: data.audioSet, answers, preference };
       const correct = answers.filter(({ played, answer }) => played === answer).length;
       $('score').textContent = `Распознано ${correct} из ${answers.length}`;
-      $('rated').textContent = preference.map(({ phrase, softness, rating }) =>
-        `«${phrase}» — мягкость ${softness}/5, приятность ${rating}/5`
-      ).join(' · ');
+      $('rated').replaceChildren(...data.preference.map(({ id, title }) => {
+        const heading = document.createElement('h4');
+        heading.textContent = title;
+        const list = document.createElement('ul');
+        for (const { phrase, softness, rating } of preference.filter(entry => entry.pair === id)) {
+          const item = document.createElement('li');
+          item.textContent = `«${phrase}» — мягкость ${softness}/5, приятность ${rating}/5`;
+          list.append(item);
+        }
+        return [heading, list];
+      }).flat());
       $('scores').replaceChildren(...data.pairs.map(({ id, phrases }) => {
         const matching = answers.filter(({ pair }) => pair === id);
         const row = document.createElement('tr');
@@ -225,7 +259,7 @@
       }));
       show('results');
       $('score').focus();
-    };
+    }
 
     $('save').onclick = () => {
       const url = URL.createObjectURL(new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' }));
@@ -243,6 +277,11 @@
       data = window.laiuListening;
       if (!data) {
         $('about').textContent = 'Откройте страницу из папки «Звучание» скачанного репозитория, где лежит practices.js.';
+        return;
+      }
+      if (!Array.isArray(data.preference) || !data.preference.length ||
+          data.preference.some(pair => pair?.phrases?.length !== 2)) {
+        $('about').textContent = 'Откройте страницу и practices.js из одного выпуска Laiu.';
         return;
       }
       $('about').textContent = data.source === 'human'

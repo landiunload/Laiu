@@ -116,6 +116,40 @@ private def checkListeningExamples (markdown : String) : IO Unit := do
     require (expected == actual) s!"Проба «{left} / {right}»: различие {actual}."
   IO.println s!"Звучание: {rows.length} пар проверены при потере долготы и границ слов."
 
+private def checkSoundRatings (markdown : String) : IO Unit := do
+  let sectionLines := (markdown.splitOn "\n").dropWhile (fun line => line.trimAscii.toString != "### Оценка звучания")
+  let rows := (sectionLines.tail.takeWhile (!·.startsWith ">")).filterMap fun line => do
+    let [code, _, first, second] := cells line | none
+    return (code, ← codeWord first, ← codeWord second)
+  require (rows.map (fun (code, _, _) => code) == ["order", "voice", "object", "invitation"])
+    "Нужны четыре пары для оценки звучания."
+  for (code, first, second) in rows do
+    let before := spokenTokens first
+    let after := spokenTokens second
+    require (before != after && (before ++ after).all Morphology.reservedForms.contains)
+      s!"Фразы для оценки должны различаться и использовать слова Laiu: «{first} / {second}»."
+    let valid := match code with
+      | "order" =>
+        let received := TemporalAdverbs.parse before
+        received.isSome && received == TemporalAdverbs.parse after
+      | "voice" =>
+        match Voice.parse before, Voice.parse after with
+        | some (.active agent patient predicate), some passive =>
+          passive == (Voice.Clause.active agent patient predicate).toPassive
+        | _, _ => false
+      | "object" =>
+        let received := Voice.parse before
+        received.isSome && received == Voice.parse after &&
+          !before.contains Voice.patientMarker && after.contains Voice.patientMarker
+      | "invitation" =>
+        match Directives.parse none before, Directives.parse none after with
+        | some base, some inclusive =>
+          base.person == .we && inclusive == { base with person := .inclusive }
+        | _, _ => false
+      | _ => false
+    require valid s!"Фразы для оценки «{first} / {second}» не соответствуют коду «{code}»."
+  IO.println s!"Звучание: {rows.length} пары для оценки сверены с грамматическими моделями."
+
 private def checkSpatialAnswers (markdown : String) : IO Unit := do
   let rows := (markdown.splitOn "\n").filterMap fun line => do
     let [question, full, short] := cells line | none
@@ -454,7 +488,9 @@ def main (args : List String) : IO Unit := do
   checkDeixis (← IO.FS.readFile (vault / "Грамматика.md"))
   checkNumerals (← IO.FS.readFile (vault / "Числа.md"))
   checkFrameExamples (← IO.FS.readFile (vault / "Проверка синтаксиса.md"))
-  checkListeningExamples (← IO.FS.readFile (vault / "Фонология.md"))
+  let sounds ← IO.FS.readFile (vault / "Фонология.md")
+  checkListeningExamples sounds
+  checkSoundRatings sounds
   checkMovementProfiles
   checkVoiceExamples (← IO.FS.readFile (vault / "Залоги.md"))
   checkVoiceProfiles

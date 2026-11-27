@@ -76,10 +76,43 @@ def check_canvas():
     return len(nodes), errors
 
 
-def check_listening_material():
-    audio_dir = ROOT / "Звучание"
+def read_trial_script(path):
+    script = path.read_text(encoding="utf-8").strip()
+    prefix = "window.laiuListening = "
+    if not script.startswith(prefix) or not script.endswith(";"):
+        raise ValueError("Немашиночитаемый набор записей practices.js")
+    return json.loads(script[len(prefix):-1])
+
+
+def listening_fingerprint(audio, phrases):
+    if set(audio) != set(phrases):
+        raise ValueError("Набор WAV не соответствует фразам пробы")
+    fingerprint = hashlib.sha256()
+    audio_prefix = "data:audio/wav;base64,"
+    for phrase in phrases:
+        uri = audio[phrase]
+        if not isinstance(uri, str) or not uri.startswith(audio_prefix):
+            raise ValueError(f"Фраза «{phrase}» должна содержать локальную WAV-запись")
+        decoded = base64.b64decode(uri[len(audio_prefix):], validate=True)
+        with wave.open(io.BytesIO(decoded)) as wav:
+            if wav.getnframes() <= 0:
+                raise ValueError(f"Пустая запись для «{phrase}»")
+            size = wav.getnframes() * wav.getsampwidth() * wav.getnchannels()
+            if len(wav.readframes(wav.getnframes())) != size:
+                raise ValueError(f"Неполная запись для «{phrase}»")
+        fingerprint.update(phrase.encode("utf-8"))
+        fingerprint.update(decoded)
+    return fingerprint.hexdigest()
+
+
+def load_listening_material():
     notes = (ROOT / "Фонология.md").read_text(encoding="utf-8")
-    pairs = re.findall(r"^\| `([^`\n]+)` \| `([^`\n]+)` \| (?:сохраняется|теряется) \|$", notes, re.MULTILINE)
+    rows = re.findall(
+        r"^\| `([^`\n]+)` \| `([^`\n]+)` \| (сохраняется|теряется) \|$",
+        notes, re.MULTILINE,
+    )
+    pairs = [{"id": f"{index:02}", "phrases": [first, second]}
+             for index, (first, second, _) in enumerate(rows, 1)]
     _, _, rating_section = notes.partition("\n### Оценка звучания\n")
     rating_rows = re.findall(
         r"^\| ([a-z]+) \| ([^|\n]+) \| `([^`\n]+)` \| `([^`\n]+)` \|$",
@@ -89,34 +122,16 @@ def check_listening_material():
                   for code, title, first, second in rating_rows]
     if not preference or len({item["id"] for item in preference}) != len(preference):
         raise ValueError("У пар оценки должны быть разные коды")
-    script = (audio_dir / "practices.js").read_text(encoding="utf-8").strip()
-    prefix = "window.laiuListening = "
-    if not script.startswith(prefix) or not script.endswith(";"):
-        raise ValueError("Немашиночитаемый набор записей practices.js")
-    trial = json.loads(script[len(prefix):-1])
+    trial = read_trial_script(ROOT / "Звучание" / "practices.js")
     if trial["source"] != "synthetic":
         raise ValueError("Публичная проба должна использовать синтетический набор")
-    if [tuple(item["phrases"]) for item in trial["pairs"]] != pairs or trial["preference"] != preference:
+    if not pairs or trial["pairs"] != pairs or trial["preference"] != preference:
         raise ValueError("Фразы пробы расходятся с фонологией")
-    phrases = {phrase for pair in pairs for phrase in pair} | {
-        phrase for item in preference for phrase in item["phrases"]
-    }
-    if set(trial["audio"]) != phrases:
-        raise ValueError("Набор WAV не соответствует фразам пробы")
-    fingerprint = hashlib.sha256()
-    for phrase, uri in trial["audio"].items():
-        audio_prefix = "data:audio/wav;base64,"
-        if not uri.startswith(audio_prefix):
-            raise ValueError(f"Фраза «{phrase}» должна содержать локальную WAV-запись")
-        decoded = base64.b64decode(uri[len(audio_prefix):], validate=True)
-        with wave.open(io.BytesIO(decoded)) as audio:
-            if audio.getnframes() <= 0:
-                raise ValueError(f"Пустая запись для «{phrase}»")
-        fingerprint.update(phrase.encode("utf-8"))
-        fingerprint.update(decoded)
-    if trial["audioSet"] != fingerprint.hexdigest():
+    phrases = list(dict.fromkeys(phrase for row in pairs + preference for phrase in row["phrases"]))
+    if list(trial["audio"]) != phrases or trial["audioSet"] != listening_fingerprint(trial["audio"], phrases):
         raise ValueError("Идентификатор набора не совпадает с WAV-записями")
-    return len(phrases)
+    predictions = {pair["id"]: row[2] for pair, row in zip(pairs, rows, strict=True)}
+    return trial, predictions
 
 
 if __name__ == "__main__":
@@ -125,4 +140,5 @@ if __name__ == "__main__":
     if errors := note_errors + canvas_errors:
         raise SystemExit("\n".join(errors))
     print(f"Справочник: {link_count} ссылок и {node_count} узлов карты проверены.")
-    print(f"Проба на слух: {check_listening_material()} WAV-записей совпадают со списком фраз.")
+    trial, _ = load_listening_material()
+    print(f"Проба на слух: {len(trial['audio'])} WAV-записей совпадают со списком фраз.")

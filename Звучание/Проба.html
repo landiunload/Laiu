@@ -126,7 +126,7 @@
     const ratingGroups = [[$('softnessA'), $('ratingA')], [$('softnessB'), $('ratingB')]];
     const ratings = ratingGroups.flat();
     const stage = ['intro', 'recording', 'recognition', 'preference', 'results'];
-    let trials, answers, ratingPairs, ratingIndex, preference, order, result, heard, received;
+    let trials, answers, ratingPairs, ratingIndex, preference, order, result, heard, received, attempt;
 
     function shuffle(items) {
       const copy = [...items];
@@ -177,6 +177,8 @@
     }
 
     function start() {
+      attempt = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte =>
+        byte.toString(16).padStart(2, '0')).join('');
       trials = shuffle(data.pairs.flatMap(({ id, phrases }) => phrases.map((phrase) =>
         ({ id, phrase, options: shuffle(phrases) }))));
       answers = [];
@@ -265,7 +267,7 @@
     };
 
     function showResults() {
-      result = { version: 3, source: data.source, audioSet: data.audioSet, answers, preference };
+      result = { version: 4, attempt, source: data.source, audioSet: data.audioSet, answers, preference };
       const correct = answers.filter(({ played, answer }) => played === answer).length;
       $('score').textContent = `Распознано ${correct} из ${answers.length}`;
       $('rated').replaceChildren(...data.preference.map(({ id, title }) => {

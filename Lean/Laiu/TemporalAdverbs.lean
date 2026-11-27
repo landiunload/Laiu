@@ -117,15 +117,44 @@ theorem parse_render (utterance : TimedUtterance) (position : Position) :
 def boundaryCount (words : List String) : Nat :=
   (Phonology.sharedVowelBoundaries words).length
 
-/-- Keep the ordinary final position unless moving the adverb removes a vowel junction. -/
+def Adverb.prefersFrontWhenTied : Adverb → Bool
+  | .soon | .recently => true
+  | _ => false
+
+/-- Minimize vowel junctions. At equal cost, distinguish луу and лоо from the tense particles. -/
 def smootherPosition (utterance : TimedUtterance) : Position :=
-  if boundaryCount (render utterance .initial) < boundaryCount (render utterance .final) then
-    .initial
+  let first := boundaryCount (render utterance .initial)
+  let last := boundaryCount (render utterance .final)
+  if first < last ∨ (first = last ∧ utterance.adverb.prefersFrontWhenTied = true) then .initial
   else .final
 
 theorem smoother_position_is_minimal (utterance : TimedUtterance) (other : Position) :
     boundaryCount (render utterance (smootherPosition utterance)) ≤ boundaryCount (render utterance other) := by
-  cases other <;> unfold smootherPosition <;> split <;> omega
+  cases other <;> dsimp only [smootherPosition] <;> split <;> omega
+
+theorem equal_boundaries_put_short_range_time_first (utterance : TimedUtterance)
+    (shortRange : utterance.adverb.prefersFrontWhenTied = true)
+    (equal : boundaryCount (render utterance .initial) = boundaryCount (render utterance .final)) :
+    smootherPosition utterance = .initial := by
+  simp [smootherPosition, shortRange, equal]
+
+private theorem person_onset (person : Syntax.Person) :
+    ∃ sound, person.word.toList.head? = some sound ∧ sound ≠ 'л' := by
+  cases person <;> exact ⟨_, rfl, by decide⟩
+
+theorem initial_short_range_time_survives_duration_and_boundary_loss
+    (timed : TimedUtterance) (bare : Utterance) (shortRange : timed.adverb.prefersFrontWhenTied = true) :
+    Phonology.withoutVowelLength (String.join (render timed .initial)) ≠
+      Phonology.withoutVowelLength (String.join (renderUtterance bare)) := by
+  intro same
+  have front : timed.adverb.word.toList.head? = some 'л' := by
+    cases adverb : timed.adverb <;> simp_all [Adverb.prefersFrontWhenTied] <;> decide
+  obtain ⟨sound, personal, different⟩ := person_onset bare.clause.person
+  have onset := congrArg (fun text : String => text.toList.head?) same
+  simp only [Phonology.duration_loss_preserves_onset, render, renderUtterance,
+    Syntax.render, List.cons_append, String.join_cons, String.toList_append, List.head?_append] at onset
+  simp [front, personal] at onset
+  exact different onset.symm
 
 theorem smoother_position_preserves_parse (utterance : TimedUtterance) :
     parse (render utterance (smootherPosition utterance)) = some utterance :=
@@ -151,5 +180,8 @@ example : (parse ["луу", "и", "ки"]).bind (·.resolvedTime .present) = som
 example : (parse ["и", "ки", "ло", "луу"]).bind (·.resolvedTime .present) = none := by decide
 example : (parse ["и", "ки", "нуу"]).bind (·.resolvedTime .past) = some .past := by decide
 example : (parse ["и", "ки", "луу"]).bind (·.resolvedTime .past) = some .future := by decide
+
+example : Phonology.withoutVowelLength "акилууэм" = Phonology.withoutVowelLength "акилуэм" := by decide
+example : Phonology.withoutVowelLength "акилооэм" = Phonology.withoutVowelLength "акилоэм" := by decide
 
 end Laiu.TemporalAdverbs

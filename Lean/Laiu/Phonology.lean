@@ -34,6 +34,10 @@ private def collapseRuns (collapse : Char → Bool) (previous : Option Char) : L
 def withoutVowelLength (word : String) : String :=
   String.ofList (collapseRuns isVowel none word.toList)
 
+theorem duration_loss_preserves_onset (text : String) :
+    (withoutVowelLength text).toList.head? = text.toList.head? := by
+  cases sounds : text.toList <;> simp [withoutVowelLength, sounds, collapseRuns]
+
 private theorem collapse_keeps_consonants (sounds : List Char) (previous : Option Char) :
     (collapseRuns isVowel previous sounds).filter (!isVowel ·) = sounds.filter (!isVowel ·) := by
   induction sounds generalizing previous with

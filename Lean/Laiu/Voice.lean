@@ -75,6 +75,38 @@ def render (clause : Clause) (markPatient : Bool := false) : List String :=
   | .passive patient agent predicate => patient :: predicateWords predicate true ++
     (agent.toList.flatMap fun word => [agentMarker, word]) ++ Syntax.spatialWords predicate.spatial
 
+/-- An object or tense contrast covered by the audit of merged sounds. -/
+def needsPatientMarker : Clause → Bool
+  | .active _ patient predicate =>
+    match (Phonology.withoutVowelLength patient).toList with
+    | [sound] =>
+      let before := (predicateWords predicate false).getLast?.bind (·.toList.getLast?)
+      let after := (Syntax.spatialWords predicate.spatial).head?.bind (·.toList.head?)
+      let betweenVowels := match before, after with
+        | some left, some right =>
+          Phonology.isVowel left && Phonology.isVowel right && left != right &&
+            (sound == left || sound == right)
+        | _, _ => false
+      let tenseCanMerge := !predicate.result && predicate.verb == .love &&
+        match predicate.time with
+        | .implicit => sound == 'о' || sound == 'у' ||
+            (sound == 'э' && after.any (fun right => Phonology.isVowel right && right != 'э'))
+        | .past => sound == 'о' || after == some sound
+        | .future => sound == 'у' || after == some sound
+        | .present => false
+      Phonology.isVowel sound && (betweenVowels || tenseCanMerge)
+    | _ => false
+  | .passive .. => false
+
+def renderConversational (clause : Clause) : List String :=
+  render clause (needsPatientMarker clause)
+
+theorem patient_marker_adds_one_word (agent patient : String) (predicate : Predicate) :
+    (render (.active agent patient predicate) true).length =
+      (render (.active agent patient predicate) false).length + 1 := by
+  simp [render]
+  omega
+
 private def readSecond (passive : Bool) (body : List String) : Option (Option String × List String) :=
   let (named, rest) := Syntax.takeFlag (if passive then agentMarker else patientMarker) body
   match passive, named, rest with
@@ -117,5 +149,13 @@ example : (parse ["а", "сэ", "пи", "эн", "там"]).map Clause.reading =
     some ⟨none, "а", ⟨.see, false, .neutral, .implicit, false, some (.source, .house)⟩⟩ := by decide
 example : parse ["а", "сэ", "пи", "и"] = none := by decide
 example : parse ["у", "пи", "ас", "э", "эн", "там"] = parse ["у", "пи", "э", "эн", "там"] := by decide
+example : (parse ["у", "пи", "лу", "у", "ин", "тив"]).map renderConversational =
+    some ["у", "пи", "лу", "ас", "у", "ин", "тив"] := by decide
+example : (parse ["у", "пи", "лу", "и", "ин", "тив"]).map renderConversational =
+    some ["у", "пи", "лу", "ас", "и", "ин", "тив"] := by decide
+example : (parse ["у", "пи", "и", "ин", "тив"]).map renderConversational =
+    some ["у", "пи", "и", "ин", "тив"] := by decide
+example : (parse ["а", "мил", "э", "ин", "там"]).map renderConversational =
+    some ["а", "мил", "ас", "э", "ин", "там"] := by decide
 
 end Laiu.Voice

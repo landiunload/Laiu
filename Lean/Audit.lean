@@ -461,13 +461,15 @@ private def checkVoiceProfiles : IO Unit := do
   checkDistinctWordSound Syntax.Person.inclusive.word
   checkDistinctWordSound Syntax.Person.exclusive.word
   let participants := personalPronouns.map Syntax.Person.word ++ ["там", "лап"]
+  let places : List (Option (Syntax.Relation × Syntax.Place)) :=
+    [none, some (.source, .house), some (.location, .house), some (.direction, .house)]
   let clauses : List Voice.Clause :=
     [Voice.Verb.see, .build, .love].flatMap fun verb =>
     [false, true].flatMap fun negative =>
     [Syntax.Phase.neutral, .starts, .stops].flatMap fun phase =>
     [Syntax.Time.implicit, .past, .present, .future].flatMap fun time =>
     [false, true].flatMap fun result =>
-    ([none, some (.source, .house)] : List (Option (Syntax.Relation × Syntax.Place))).flatMap fun spatial =>
+    places.flatMap fun spatial =>
     participants.flatMap fun patient =>
       let predicate : Voice.Predicate := ⟨verb, negative, phase, time, result, spatial⟩
       .passive patient none predicate :: (participants.flatMap fun agent =>
@@ -497,6 +499,18 @@ private def checkVoiceProfiles : IO Unit := do
       total := total + 1
   IO.println s!"Залог: {total} фраз и {vowelProfiles.readings.size} звуковых профилей без долготы гласных. Совпадения только в кратком активе ({vowelProfiles.ambiguous.size})."
   IO.println s!"Без долготы гласных и согласных: {soundProfiles.readings.size} профилей. Совпадения только в кратком активе ({soundProfiles.ambiguous.size})."
+  let mut checked := 0
+  let mut marked := 0
+  for clause in clauses do
+    if let .active .. := clause then
+      let bare := Voice.render clause
+      let ambiguous := soundProfiles.ambiguous.contains (Phonology.withoutSoundLength (String.join bare))
+      let selected := Voice.renderConversational clause
+      unless Voice.needsPatientMarker clause == ambiguous && Voice.parse selected == some clause do
+        throw (IO.userError s!"Правило выбора ас расходится с профилем «{String.intercalate " " bare}».")
+      checked := checked + 1
+      if ambiguous then marked := marked + 1
+  IO.println s!"Выбор ас проверен для {checked} активных фраз. Частица нужна в модели для {marked} из них."
 
 private def checkDeixis (markdown : String) : IO Unit := do
   let grammarRows := (markdown.splitOn "\n").map cells

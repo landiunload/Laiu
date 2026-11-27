@@ -112,7 +112,7 @@ theorem compact_minimal {active : Option Addressee} {written : List String} {cla
 
 example : parse (some .one) ["мо", "ли", "ки"] =
     some ⟨.listener, true, .neutral, .go, .implicit, false, none⟩ := by decide
-example : parse (some .one) ["ииа", "мо", "ки"] =
+example : parse (some .one) ["ила", "мо", "ки"] =
     some ⟨.inclusive, false, .neutral, .go, .implicit, false, none⟩ := by decide
 example : parse (some .group) ["мо", "ки"] =
     some ⟨.youPlural, false, .neutral, .go, .implicit, false, none⟩ := by decide

@@ -14,8 +14,8 @@ def Person.word : Person → String
   | .woman => "о"
   | .neutral => "э"
   | .we => "ии"
-  | .inclusive => "ииа"
-  | .exclusive => "ииэ"
+  | .inclusive => "ила"
+  | .exclusive => "инэ"
   | .youPlural => "аа"
   | .polite => "ааа"
   | .men => "уу"
@@ -29,8 +29,8 @@ def readPerson : String → Option Person
   | "о" => some .woman
   | "э" => some .neutral
   | "ии" => some .we
-  | "ииа" => some .inclusive
-  | "ииэ" => some .exclusive
+  | "ила" => some .inclusive
+  | "инэ" => some .exclusive
   | "аа" => some .youPlural
   | "ааа" => some .polite
   | "уу" => some .men
@@ -166,11 +166,11 @@ theorem compact_present_saves_one (clause : Phrase) (present : clause.time = .pr
 example : render (compact ⟨.speaker, false, .neutral, .go, .present, false, none⟩) =
     ["и", "ки"] := rfl
 
-private def takeFlag (marker : String) : List String → Bool × List String
+def takeFlag (marker : String) : List String → Bool × List String
   | [] => (false, [])
   | first :: rest => if first == marker then (true, rest) else (false, first :: rest)
 
-private def takePhase : List String → Phase × List String
+def takePhase : List String → Phase × List String
   | "тиа" :: rest => (.starts, rest)
   | "нэо" :: rest => (.stops, rest)
   | rest => (.neutral, rest)
@@ -181,7 +181,7 @@ private def takeTravel : List String → Option (Travel × List String)
   | "ру" :: rest => some (.move, rest)
   | _ => none
 
-private def takeTime : List String → Time × List String
+def takeTime : List String → Time × List String
   | "ло" :: rest => (.past, rest)
   | "лэ" :: rest => (.present, rest)
   | "лу" :: rest => (.future, rest)

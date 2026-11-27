@@ -99,7 +99,7 @@ def unwantedResemblance : List String → Option (List String)
 
 example : unwantedResemblance ["а", "каа", "ки", "куа"] = some ["каа", "ки"] := by decide
 example : unwantedResemblance ["ла", "пуу", "та"] = some ["пуу", "та"] := by decide
-example : unwantedResemblance ["ииа", "мо", "ки"] = none := by decide
+example : unwantedResemblance ["ила", "мо", "ки"] = none := by decide
 example : unwantedResemblance ["мо", "ли", "ки"] = none := by decide
 
 set_option maxRecDepth 4096 in

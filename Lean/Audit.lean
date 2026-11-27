@@ -202,14 +202,15 @@ private def checkDistinctWordSound (word : String) : IO Unit := do
   let resembling := Morphology.reservedForms.filter (fun form => Phonology.withoutVowelLength form == key)
   require (resembling == [word]) s!"Созвучная форма для «{word}»: {resembling}."
 
+private def personalPronouns : List Syntax.Person := [.speaker, .listener, .man, .woman, .neutral,
+  .we, .inclusive, .exclusive, .youPlural, .polite, .men, .women, .neutralPlural]
+
 private def checkMovementProfiles : IO Unit := do
   let places : List Syntax.Place := [.garden, .house, .tree]
   let relations : List Syntax.Relation := [.location, .direction, .source]
   let settings := none :: relations.flatMap fun relation => places.map fun place => some (relation, place)
-  let people : List Syntax.Person := [.speaker, .listener, .man, .woman, .neutral,
-    .we, .inclusive, .exclusive, .youPlural, .polite, .men, .women, .neutralPlural]
   let phrases : List Syntax.Phrase :=
-    people.flatMap fun person =>
+    personalPronouns.flatMap fun person =>
     [false, true].flatMap fun negative =>
     [Syntax.Phase.neutral, .starts, .stops].flatMap fun phase =>
     [Syntax.Travel.go, .returnTo, .move].flatMap fun travel =>
@@ -231,6 +232,70 @@ private def checkMovementProfiles : IO Unit := do
   for marker in Syntax.Phase.stops.words do
     checkDistinctWordSound marker
   IO.println s!"Проверка слитной речи охватывает {phrases.length} фраз движения и {profiles.size} звуковых профилей."
+
+private def checkVoiceExamples (markdown : String) : IO Unit := do
+  let rows := (markdown.splitOn "\n").filterMap fun line => do
+    let [active, passive, anonymous] := (cells line).map (fun cell => (cell.splitOn "`")[1]?) | none
+    return (← active, ← passive, ← anonymous)
+  require (!rows.isEmpty) "В заметке о залогах нет примеров с тремя вариантами."
+  for (active, passive, anonymous) in rows do
+    let some (.active agent patient predicate) := Voice.parse (spokenTokens active) |
+      throw (IO.userError s!"Не удалось разобрать актив «{active}».")
+    let activeClause : Voice.Clause := .active agent patient predicate
+    require (Voice.parse (spokenTokens passive) == some activeClause.toPassive &&
+      Voice.parse (spokenTokens anonymous) == some (.passive patient none predicate))
+      s!"В формах залога расходятся роли или действие для «{active}»."
+  IO.println s!"Сверены примеры залога ({rows.length}): актив и две формы пассива."
+
+private def checkVoiceProfiles : IO Unit := do
+  checkDistinctWordSound Voice.passiveMarker
+  checkDistinctWordSound Voice.agentMarker
+  checkDistinctWordSound Voice.patientMarker
+  checkDistinctWordSound Syntax.Person.inclusive.word
+  checkDistinctWordSound Syntax.Person.exclusive.word
+  let participants := personalPronouns.map Syntax.Person.word ++ ["там", "лап"]
+  let clauses : List Voice.Clause :=
+    [Voice.Verb.see, .build, .love].flatMap fun verb =>
+    [false, true].flatMap fun negative =>
+    [Syntax.Phase.neutral, .starts, .stops].flatMap fun phase =>
+    [Syntax.Time.implicit, .past, .present, .future].flatMap fun time =>
+    [false, true].flatMap fun result =>
+    ([none, some (.source, .house)] : List (Option (Syntax.Relation × Syntax.Place))).flatMap fun spatial =>
+    participants.flatMap fun patient =>
+      let predicate : Voice.Predicate := ⟨verb, negative, phase, time, result, spatial⟩
+      .passive patient none predicate :: (participants.flatMap fun agent =>
+        let active : Voice.Clause := .active agent patient predicate
+        [active, active.toPassive])
+  let mut profiles : Std.HashMap String (Bool × (Bool × Voice.Reading)) := {}
+  let mut ambiguous : Std.HashSet String := {}
+  let mut total := 0
+  for clause in clauses do
+    let voice := match clause with
+      | .active .. => false
+      | .passive .. => true
+    let reading := clause.reading
+    let time := if reading.predicate.time == .present then .implicit else reading.predicate.time
+    let key := (voice, { reading with
+      agent := reading.agent.map Phonology.withoutVowelLength
+      patient := Phonology.withoutVowelLength reading.patient
+      predicate := { reading.predicate with time } })
+    for marked in (if voice then [false] else [false, true]) do
+      let words := Voice.render clause marked
+      unless Voice.parse words == some clause do
+        throw (IO.userError s!"Разбор залога не восстанавливает «{String.intercalate " " words}».")
+      let spoken := Phonology.withoutVowelLength (String.join words)
+      let clear := voice || marked
+      if let some (earlierClear, earlier) := profiles[spoken]? then
+        if (key != earlier && (earlierClear || clear)) || (clear && ambiguous.contains spoken) then
+          throw (IO.userError s!"В слитной речи меняются залог, роли или действие в «{String.intercalate " " words}».")
+        if key != earlier then
+          ambiguous := ambiguous.insert spoken
+        if clear then
+          profiles := profiles.insert spoken (true, key)
+      else
+        profiles := profiles.insert spoken (clear, key)
+      total := total + 1
+  IO.println s!"Залог: {total} фраз и {profiles.size} звуковых профилей. Совпадения только в кратком активе ({ambiguous.size})."
 
 private def checkDeixis (markdown : String) : IO Unit := do
   let grammarRows := (markdown.splitOn "\n").map cells
@@ -391,6 +456,8 @@ def main (args : List String) : IO Unit := do
   checkFrameExamples (← IO.FS.readFile (vault / "Проверка синтаксиса.md"))
   checkListeningExamples (← IO.FS.readFile (vault / "Фонология.md"))
   checkMovementProfiles
+  checkVoiceExamples (← IO.FS.readFile (vault / "Залоги.md"))
+  checkVoiceProfiles
   let questions ← IO.FS.readFile (vault / "Вопросительные слова.md")
   checkSpatialAnswers questions
   checkPolarityAnswers questions

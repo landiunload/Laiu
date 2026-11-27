@@ -107,6 +107,74 @@ theorem patient_marker_adds_one_word (agent patient : String) (predicate : Predi
   simp [render]
   omega
 
+theorem named_passive_adds_one_word_to_marked_active (agent patient : String) (predicate : Predicate) :
+    (render (Clause.active agent patient predicate).toPassive).length =
+      (render (.active agent patient predicate) true).length + 1 := by
+  simp [Clause.toPassive, render, predicateWords] <;> omega
+
+def junctionCount (words : List String) : Nat :=
+  (Phonology.sharedVowelBoundaries words).length + (Phonology.sharedConsonantBoundaries words).length
+
+/-- Use the shorter active form when both have the same junction count and reading. -/
+def markPatientForFewerJunctions (clause : Clause) : Bool :=
+  needsPatientMarker clause || junctionCount (render clause true) < junctionCount (render clause)
+
+/-- Compare these forms when the speaker is free to put the patient first. -/
+def voiceWithFewerJunctions (clause : Clause) : Clause × Bool :=
+  let marked := markPatientForFewerJunctions clause
+  if junctionCount (render clause.toPassive) < junctionCount (render clause marked) then
+    (clause.toPassive, false)
+  else (clause, marked)
+
+theorem fewer_junctions_preserves_reading (clause : Clause) :
+    (voiceWithFewerJunctions clause).1.reading = clause.reading := by
+  dsimp only [voiceWithFewerJunctions]
+  split
+  · exact passivizing_preserves_roles_and_predicate clause
+  · rfl
+
+theorem fewer_junctions_minimizes_count (clause : Clause) :
+    let chosen := voiceWithFewerJunctions clause
+    junctionCount (render chosen.1 chosen.2) ≤
+      min (junctionCount (render clause (markPatientForFewerJunctions clause)))
+        (junctionCount (render clause.toPassive)) := by
+  dsimp only [voiceWithFewerJunctions]
+  split <;> dsimp <;> omega
+
+theorem active_choice_uses_no_more_junctions (clause : Clause) (marked : Bool)
+    (available : marked = true ∨ needsPatientMarker clause = false) :
+    junctionCount (render clause (markPatientForFewerJunctions clause)) ≤
+      junctionCount (render clause marked) := by
+  cases marked with
+  | false =>
+    have clear : needsPatientMarker clause = false := by simpa using available
+    by_cases fewer : junctionCount (render clause true) < junctionCount (render clause false)
+    · simpa [markPatientForFewerJunctions, clear, fewer] using Nat.le_of_lt fewer
+    · simp [markPatientForFewerJunctions, clear, fewer]
+  | true =>
+    by_cases fewer : junctionCount (render clause true) < junctionCount (render clause false)
+    · simp [markPatientForFewerJunctions, fewer]
+    · cases needs : needsPatientMarker clause <;> simp [markPatientForFewerJunctions, fewer, needs] <;> omega
+
+theorem chosen_uses_no_more_junctions_than_available_active (clause : Clause) (marked : Bool)
+    (available : marked = true ∨ needsPatientMarker clause = false) :
+    let chosen := voiceWithFewerJunctions clause
+    junctionCount (render chosen.1 chosen.2) ≤ junctionCount (render clause marked) := by
+  exact Nat.le_trans (fewer_junctions_minimizes_count clause)
+    (Nat.le_trans (Nat.min_le_left ..) (active_choice_uses_no_more_junctions clause marked available))
+
+theorem keep_bare_active_on_equal_count (clause : Clause)
+    (clear : needsPatientMarker clause = false)
+    (equal : junctionCount (render clause true) = junctionCount (render clause false)) :
+    markPatientForFewerJunctions clause = false := by
+  simp [markPatientForFewerJunctions, clear, equal]
+
+theorem keep_original_voice_on_equal_count (clause : Clause)
+    (equal : junctionCount (render clause.toPassive) =
+      junctionCount (render clause (markPatientForFewerJunctions clause))) :
+    (voiceWithFewerJunctions clause).1 = clause := by
+  simp [voiceWithFewerJunctions, equal]
+
 private def readSecond (passive : Bool) (body : List String) : Option (Option String × List String) :=
   let (named, rest) := Syntax.takeFlag (if passive then agentMarker else patientMarker) body
   match passive, named, rest with
@@ -157,5 +225,11 @@ example : (parse ["у", "пи", "и", "ин", "тив"]).map renderConversationa
     some ["у", "пи", "и", "ин", "тив"] := by decide
 example : (parse ["а", "мил", "э", "ин", "там"]).map renderConversational =
     some ["а", "мил", "ас", "э", "ин", "там"] := by decide
+example : (parse ["у", "пи", "лу", "ас", "и", "ин", "тив"]).map
+    (fun clause => let form := voiceWithFewerJunctions clause; render form.1 form.2) =
+    some ["и", "сэ", "пи", "лу", "рэн", "у", "ин", "тив"] := by decide
+example : (parse ["у", "пи", "и"]).map
+    (fun clause => let form := voiceWithFewerJunctions clause; render form.1 form.2) =
+    some ["у", "пи", "ас", "и"] := by decide
 
 end Laiu.Voice

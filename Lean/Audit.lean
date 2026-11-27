@@ -501,6 +501,9 @@ private def checkVoiceProfiles : IO Unit := do
   IO.println s!"Без долготы гласных и согласных: {soundProfiles.readings.size} профилей. Совпадения только в кратком активе ({soundProfiles.ambiguous.size})."
   let mut checked := 0
   let mut marked := 0
+  let mut switched := 0
+  let mut switchedFromMarked := 0
+  let mut optionalMarkers := 0
   for clause in clauses do
     if let .active .. := clause then
       let bare := Voice.render clause
@@ -510,7 +513,18 @@ private def checkVoiceProfiles : IO Unit := do
         throw (IO.userError s!"Правило выбора ас расходится с профилем «{String.intercalate " " bare}».")
       checked := checked + 1
       if ambiguous then marked := marked + 1
+      let (alternative, useMarker) := Voice.voiceWithFewerJunctions clause
+      if alternative != clause then
+        switched := switched + 1
+        if ambiguous then switchedFromMarked := switchedFromMarked + 1
+      else if useMarker && !ambiguous then optionalMarkers := optionalMarkers + 1
+      let spoken := Voice.render alternative useMarker
+      unless alternative.reading == clause.reading && Voice.parse spoken == some alternative &&
+        !soundProfiles.ambiguous.contains (Phonology.withoutSoundLength (String.join spoken)) do
+        throw (IO.userError s!"Вариант с меньшим числом стыков потерял разбор «{String.intercalate " " bare}».")
   IO.println s!"Выбор ас проверен для {checked} активных фраз. Частица нужна в модели для {marked} из них."
+  IO.println s!"Пассив уменьшает число стыков в {switched} случаях из {checked}; в {switchedFromMarked} из них ас требуется для ясности актива."
+  IO.println s!"Актив с необязательным ас выбран по числу стыков для {optionalMarkers} реплик."
 
 private def checkDeixis (markdown : String) : IO Unit := do
   let grammarRows := (markdown.splitOn "\n").map cells
